@@ -1,0 +1,704 @@
+{
+  "name": "Bia – atendimento WhatsApp com IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "bia-whatsapp",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -64,
+        0
+      ],
+      "id": "8852a703-b051-4728-9077-0492d68572c8",
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body ?? $input.first().json;\nconst event = body?.event ?? '';\n\n// Só processar mensagens recebidas\nif (event !== 'messages.upsert') {\n  return [];\n}\n\nconst data = body?.data;\nif (!data) return [];\n\n// Ignorar mensagens enviadas pelo próprio WhatsApp conectado\nif (data?.key?.fromMe === true) {\n  return [];\n}\n\nconst remoteJid = data?.key?.remoteJid ?? '';\n\n// Ignorar status/broadcast\nif (remoteJid === 'status@broadcast') {\n  return [];\n}\n\n// Ignorar grupos\nif (remoteJid.includes('@g.us')) {\n  return [];\n}\n\n// Bloquear @lid, pois não é número real e quebra o envio\nif (remoteJid.includes('@lid')) {\n  console.log(`[LID BLOQUEADO] ${remoteJid}`);\n  return [];\n}\n\n// Validar se veio como número real do WhatsApp\nif (!remoteJid.includes('@s.whatsapp.net')) {\n  console.log(`[JID INVÁLIDO] ${remoteJid}`);\n  return [];\n}\n\n// Extrair número limpo\nconst numero = remoteJid\n  .replace('@s.whatsapp.net', '')\n  .replace(/\\D/g, '');\n\n// Extrair texto da mensagem\nconst mensagem =\n  data?.message?.conversation ??\n  data?.message?.extendedTextMessage?.text ??\n  data?.message?.imageMessage?.caption ??\n  data?.message?.videoMessage?.caption ??\n  '';\n\nconst mensagemLimpa = mensagem.trim();\n\nif (!mensagemLimpa) {\n  console.log('[MENSAGEM VAZIA OU TIPO NÃO SUPORTADO]');\n  return [];\n}\n\n// Dados extras úteis\nconst pushName = data?.pushName ?? '';\nconst nome = pushName || 'Cliente';\nconst messageId = data?.key?.id ?? '';\nconst tipoMensagem = data?.messageType ?? 'desconhecido';\nconst timestamp = data?.messageTimestamp ?? Math.floor(Date.now() / 1000);\nconst dataHora = new Date(timestamp * 1000).toISOString();\n\nreturn [\n  {\n    json: {\n      numero,\n      nome,\n      pushName,\n      mensagem: mensagemLimpa,\n      remoteJid,\n      messageId,\n      tipoMensagem,\n      timestamp,\n      dataHora\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        0
+      ],
+      "id": "9d0f3086-6e35-4ca2-b1af-b248b2ef4318",
+      "name": "Filtrar e Extrair Dados"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4c309c49-cbc8-4625-a2cb-fc232ffa098f",
+              "leftValue": "={{ $('Criar ou Atualizar Lead').first().json.bot_ativo }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "061a5a88-59dc-4a47-a322-a0d6c3440abe",
+              "leftValue": "={{ $json.eh_ultima_mensagem }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        928,
+        0
+      ],
+      "id": "469c4b31-e5c4-435b-bb49-b65ff58f6463",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $('Criar ou Atualizar Lead').first().json;\nconst mensagens = $('Buscar últimas mensagens').all().map(item => item.json);\n\n// O banco busca da mais nova para a mais antiga.\n// Aqui invertemos para enviar para a IA na ordem correta.\nconst historico = mensagens.reverse().map(msg => ({\n  role: msg.role,\n  content: msg.mensagem\n}));\n\nconst conversaEmAndamento = historico.length > 1;\n\nreturn [\n  {\n    json: {\n      cliente: {\n        telefone: lead.telefone,\n        nome: lead.nome || 'Cliente',\n        etapa_atual: lead.etapa_atual || 'inicio',\n        projeto: lead.projeto || '',\n        experiencia: lead.experiencia || '',\n        cidade: lead.cidade || '',\n        produto_interesse: lead.produto_interesse || '',\n        bot_ativo: lead.bot_ativo\n      },\n\n      mensagem_atual: lead.mensagem_atual,\n      remoteJid: lead.remote_jid_atual,\n\n      historico_recente: historico,\n      conversaEmAndamento,\n\n      instrucao_curta: `\nResponda como uma pessoa real no WhatsApp.\n\nAntes de responder, leia o histórico recente.\nSe a conversa já começou, não cumprimente novamente.\nNão diga \"Bem-vindo à Sua Empresa\" no meio da conversa.\nNão repita o nome do cliente em toda resposta.\nNão pergunte algo que o cliente já respondeu.\nFaça no máximo uma pergunta.\nNão use lista.\nNão use bullets.\nNão escreva texto grande.\nResponda em no máximo 320 caracteres.\nA resposta precisa continuar naturalmente a conversa.\n      `.trim()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -96
+      ],
+      "id": "813f16f5-6aab-41c4-852f-61c8e79bf68e",
+      "name": "Montar contexto"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (['catalogo_produtos', 'detalhe_segmento', 'lead_facebook_inicial'].includes($json.intencao)) {\n  return [];\n}\n\n// A chave vem do .env (ANTHROPIC_API_KEY). Nunca deixe a chave escrita no código.\nconst apiKey = $env.ANTHROPIC_API_KEY;\n\nconst cliente = $json.cliente || {};\nconst historico = Array.isArray($json.historico_recente) ? $json.historico_recente : [];\n\nconst mensagemAtual =\n  $json.mensagem_atual ||\n  $json.mensagem ||\n  '';\n\nconst telefone =\n  cliente.telefone ||\n  $json.telefone ||\n  $json.numero ||\n  '';\n\nconst remoteJid =\n  $json.remoteJid ||\n  $json.remote_jid_atual ||\n  $json.remote_jid ||\n  (telefone ? `${telefone}@s.whatsapp.net` : '');\n\nconst nomeCliente =\n  cliente.nome ||\n  $json.nome ||\n  $json.pushName ||\n  $json.push_name ||\n  'Cliente';\n\nconst siteOficial =\n  $json.siteOficial ||\n  'www.suaempresa.com.br';\n\nconst linksProdutos =\n  $json.linksProdutos ||\n  {};\n\nconst conversaEmAndamento =\n  $json.conversaEmAndamento === true &&\n  historico.length > 0;\n\n// SAUDAÇÃO FIXA — início de conversa, sem histórico\nif ($json.intencao === 'saudacao' && !conversaEmAndamento) {\n  const textoResposta = `Olá. Seja muito bem-vindo à família Sua Empresa! \nAqui é o Bia, e será um prazer te atender 😊\n\nComo posso lhe ajudar hoje?\n\nVocê também pode conhecer todos os nossos produtos em:\nwww.suaempresa.com.br\n\nE acompanhar novidades, inspirações e conteúdos no nosso Instagram:\n@suaempresa 💫`;\n\n  return [\n    {\n      json: {\n        ...$json,\n        numero: telefone,\n        telefone,\n        remoteJid,\n        mensagem: mensagemAtual,\n        pushName: nomeCliente,\n        textoResposta,\n        conversaEmAndamento,\n        origemResposta: 'saudacao_inicial_completa'\n      }\n    }\n  ];\n}\n\n// SAUDAÇÃO CURTA — quando já existe histórico/contexto\nif ($json.intencao === 'saudacao' && conversaEmAndamento) {\n  const textoResposta = `Olá! Aqui é o Bia, atendente virtual da Sua Empresa. Como posso te ajudar?`;\n\n  return [\n    {\n      json: {\n        ...$json,\n        numero: telefone,\n        telefone,\n        remoteJid,\n        mensagem: mensagemAtual,\n        pushName: nomeCliente,\n        textoResposta,\n        conversaEmAndamento,\n        origemResposta: 'saudacao_curta_com_contexto'\n      }\n    }\n  ];\n}\n\nconst dadosLead = {\n  nome: nomeCliente,\n  telefone,\n  etapa_atual: cliente.etapa_atual || $json.etapa_atual || '',\n  projeto: cliente.projeto || $json.projeto || '',\n  experiencia: cliente.experiencia || $json.experiencia || '',\n  cidade: cliente.cidade || $json.cidade || '',\n  produto_interesse: cliente.produto_interesse || $json.produto_interesse || ''\n};\n\nconst produtoIndicado =\n  $json.produto_indicado ||\n  $json.produtoIndicado ||\n  cliente.produto_interesse ||\n  '';\n\nconst segmentoIndicado =\n  $json.segmento_indicado ||\n  $json.segmentoIndicado ||\n  $json.segmentoDetalhe ||\n  $json.segmento ||\n  '';\n\nconst quantidadeCalculada =\n  $json.quantidade_calculada ||\n  $json.quantidadeCalculada ||\n  '';\n\nconst kitRecomendado =\n  $json.kit_recomendado ||\n  $json.kitRecomendado ||\n  '';\n\nlet linkProduto =\n  $json.linkProduto ||\n  $json.link_produto ||\n  '';\n\n// Se já tiver produto indicado e existir link oficial na base, usa ele\nif (!linkProduto && produtoIndicado && linksProdutos[produtoIndicado]) {\n  linkProduto = linksProdutos[produtoIndicado];\n}\n\n// Segurança: só aceita link oficial da Sua Empresa\nif (linkProduto && !String(linkProduto).toLowerCase().includes('suaempresa.com.br')) {\n  linkProduto = '';\n}\n\nconst historicoFormatado = historico\n  .slice(-8)\n  .map((m) => {\n    const role = m.role || m.tipo || 'cliente';\n    const content = m.content || m.mensagem || '';\n    return `${role}: ${content}`;\n  })\n  .join('\\n');\n\n// EXEMPLO: adapte estes textos para o seu negócio.\nconst guiaProdutosEssencial = `\nGUIA INTERNO DE INDICAÇÃO:\nPROD-A — uso geral, ideal para iniciantes.\nPROD-B — uso geral com acabamento superior.\nPROD-PRO — aplicações profissionais que exigem alta resistência.\n`.trim();\n\nconst regrasCalculo = `\nSó calcule quantidade quando o cliente informar as medidas do projeto.\nSe faltar alguma medida, pergunte apenas a medida que falta.\n`.trim();\n\nconst regraKits = `\nRecomende somente tamanhos que existem na base de produtos.\nSe a quantidade calculada ficar entre dois tamanhos, indique o maior.\n`.trim();\n\nconst politicaFrete = `\nNunca prometa frete grátis para um pedido específico.\nPara prazo e valor de frete, oriente o cliente a simular no carrinho do site.\n`.trim();\n\nconst regraLinks = `\nUse somente links da base oficial. Nunca invente URLs.\nSe não houver link do produto, envie apenas o site oficial.\n`.trim();\n\nconst systemPrompt = `\nVocê é a Bia, atendente virtual da Sua Empresa no WhatsApp.\n\nOBJETIVO:\nAtender de forma humana, clara e comercial.\nAjudar o cliente a escolher o produto correto.\nCalcular quantidade quando houver dados suficientes.\nConduzir naturalmente para a compra quando fizer sentido.\n\nFUNÇÃO DESTE NODE:\nEste node responde apenas as conversas consultivas.\nCatálogo geral, detalhe de linha e lead de anúncio são tratados por outros nodes do fluxo.\n\nTOM DE VOZ:\nProfissional, acolhedor, claro e natural para WhatsApp.\nComercial sem pressionar.\nNo máximo 1 emoji quando fizer sentido.\nSem gírias e sem Markdown.\n\nCONTINUIDADE:\nLeia o histórico antes de responder.\nNão cumprimente de novo se a conversa já começou.\nFaça no máximo uma pergunta por mensagem.\n`.trim();\n\nconst dadosContexto = {\n  cliente: dadosLead,\n  conversaEmAndamento,\n  intencao: $json.intencao || '',\n  mensagemAtual,\n  produtoIndicado,\n  segmentoIndicado,\n  quantidadeCalculada,\n  kitRecomendado,\n  siteOficial,\n  linkProduto,\n  linksProdutos\n};\n\nconst mensagemParaIA = `\nDADOS DO ATENDIMENTO:\n${JSON.stringify(dadosContexto, null, 2)}\n\nHISTÓRICO RECENTE:\n${historicoFormatado || 'Sem histórico recente.'}\n\nGUIA ESSENCIAL DE PRODUTOS:\n${guiaProdutosEssencial}\n\nREGRAS DE CÁLCULO:\n${regrasCalculo}\n\nREGRAS DE KIT:\n${regraKits}\n\nPOLÍTICA DE FRETE:\n${politicaFrete}\n\nREGRAS DE LINKS:\n${regraLinks}\n\nMENSAGEM ATUAL DO CLIENTE:\n${mensagemAtual}\n\nINSTRUÇÃO FINAL:\nResponda como Bia, atendente da Sua Empresa no WhatsApp.\nNão apresente catálogo geral.\nNão misture todos os segmentos.\nResponda somente o que faz sentido para a mensagem atual.\nNão use Markdown nem asteriscos.\nNão cumprimente de novo se a conversa já começou.\nNão chame o cliente pelo nome se a conversa já estiver em andamento.\nFaça no máximo uma pergunta principal.\nSe já houver produto indicado, conduza naturalmente para o próximo passo.\nNunca afirme que o pedido do cliente deu frete grátis.\nNunca diga que o kit indicado atinge frete grátis.\nSe o cliente perguntar sobre frete, informe somente a política geral de frete grátis e oriente a simular no carrinho.\nNunca invente links.\nNunca crie URL de produto.\nNunca use suaempresa.store.\nNunca use domínio diferente de suaempresa.com.br.\nSe linkProduto estiver preenchido, pode enviar esse link.\nSe linkProduto estiver vazio, envie apenas www.suaempresa.com.br quando o cliente pedir link, preço, valor ou compra.\n`.trim();\n\nconst response = await this.helpers.httpRequest({\n  method: 'POST',\n  url: 'https://api.anthropic.com/v1/messages',\n  headers: {\n    'x-api-key': apiKey,\n    'anthropic-version': '2023-06-01',\n    'content-type': 'application/json'\n  },\n  body: {\n    model: 'claude-sonnet-4-5-20250929',\n    max_tokens: 350,\n    temperature: 0.25,\n    system: systemPrompt,\n    messages: [\n      {\n        role: 'user',\n        content: mensagemParaIA\n      }\n    ]\n  },\n  json: true\n});\n\nlet textoResposta = response?.content?.[0]?.text || '';\n\ntextoResposta = textoResposta\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n  .replace(/^[\"“”]+|[\"“”]+$/g, '')\n  .trim();\n\nif (!textoResposta) {\n  throw new Error('Resposta vazia da IA: ' + JSON.stringify(response));\n}\n\ntextoResposta = textoResposta\n  .replace(/^opa[!,.\\s]*/i, 'Olá! ')\n  .replace(/\\bmassa\\b/gi, 'Perfeito')\n  .replace(/\\btri\\b/gi, 'Ótimo')\n  .replace(/\\bbah\\b/gi, '')\n  .replace(/\\btchê\\b/gi, '')\n  .replace(/\\bshow de bola\\b/gi, 'Perfeito')\n  .replace(/\\btop\\b/gi, 'ótimo')\n  .replace(/\\birado\\b/gi, 'muito bom')\n  .replace(/\\blegal demais\\b/gi, 'muito legal')\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n  .replace(/\\*/g, '')\n  .replace(/^#{1,6}\\s+/gm, '')\n  .replace(/^\\s*[-•*]\\s+/gm, '')\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\n// Segurança extra: troca/remova qualquer domínio/link inventado antes de sair do node\ntextoResposta = textoResposta\n  .replace(/https?:\\/\\/(?:www\\.)?suaempresa\\.store[^\\s]*/gi, siteOficial)\n  .replace(/(?:www\\.)?suaempresa\\.store[^\\s]*/gi, siteOficial)\n  .replace(/https?:\\/\\/(?:www\\.)?suaempresa\\.com[^\\s]*/gi, siteOficial)\n  .replace(/(?:www\\.)?suaempresa\\.com[^\\s]*/gi, siteOficial)\n  .replace(/https?:\\/\\/loja\\.suaempresa[^\\s]*/gi, siteOficial)\n  .replace(/loja\\.suaempresa[^\\s]*/gi, siteOficial);\n\nconst urlsResposta = textoResposta.match(/https?:\\/\\/[^\\s]+|www\\.[^\\s]+/gi) || [];\n\nfor (const url of urlsResposta) {\n  const ehOficial = url.toLowerCase().includes('suaempresa.com.br');\n\n  if (!ehOficial) {\n    textoResposta = textoResposta.replace(url, siteOficial);\n  }\n}\n\nif (conversaEmAndamento) {\n  textoResposta = textoResposta\n    .replace(/^(oi|olá|ola|bom dia|boa tarde|boa noite)[,!\\s]+[^.!?\\n]{0,40}[.!?\\n]?\\s*/i, '')\n    .replace(/^tudo bem\\??\\s*/i, '')\n    .replace(/^bem[- ]vindo[a]? à sua empresa[.!?\\s]*/i, '')\n    .replace(/^bem[- ]vindo[a]? à suaempresa[.!?\\s]*/i, '')\n    .replace(/^como posso te ajudar hoje[?!.]?\\s*/i, '')\n    .trim();\n}\n\nif (!textoResposta) {\n  textoResposta = 'Perfeito. Me conta só mais um detalhe para eu te orientar certinho.';\n}\n\nif (textoResposta.length > 650) {\n  textoResposta = textoResposta.slice(0, 650).trim();\n\n  const ultimoPonto = Math.max(\n    textoResposta.lastIndexOf('.'),\n    textoResposta.lastIndexOf('?'),\n    textoResposta.lastIndexOf('!')\n  );\n\n  if (ultimoPonto > 250) {\n    textoResposta = textoResposta.slice(0, ultimoPonto + 1).trim();\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      numero: telefone,\n      telefone,\n      remoteJid,\n      mensagem: mensagemAtual,\n      pushName: nomeCliente,\n      textoResposta,\n      conversaEmAndamento,\n      historico_recente: historico,\n      siteOficial,\n      linkProduto,\n      linksProdutos,\n      origemResposta: 'chamar_ia'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        192
+      ],
+      "id": "b485537e-b7bd-424e-afc0-2ef3bcf71c54",
+      "name": "Chamar IA"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES (\n  (SELECT id FROM leads WHERE telefone = '{{ $json.numero }}'),\n  '{{ $json.numero }}',\n  'entrada',\n  '{{ $('Filtrar e Extrair Dados').first().json.mensagem }}'\n);\n\nINSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES (\n  (SELECT id FROM leads WHERE telefone = '{{ $json.numero }}'),\n  '{{ $json.numero }}',\n  'saida',\n  '{{ $json.textoResposta }}'\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3456,
+        -96
+      ],
+      "id": "f52ba9a1-5ea3-4f27-8c68-062353a486e0",
+      "name": "Salvar mensagem",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.textoResposta) {\n  return [];\n}\n\nconst numeroRaw =\n  $json.numero ||\n  $json.telefone ||\n  $json.cliente?.telefone ||\n  $json.remoteJid ||\n  $json.remote_jid_atual ||\n  '';\n\nlet numero = String(numeroRaw)\n  .replace('@s.whatsapp.net', '')\n  .replace('@lid', '')\n  .replace(/\\D/g, '');\n\nlet textoResposta = String($json.textoResposta || '')\n  // Remove caracteres invisíveis\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n\n  // Remove Markdown/negrito/itálico\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n\n  // Remove qualquer asterisco restante\n  .replace(/\\*/g, '')\n\n  // Remove espaços duplicados, mas mantém quebras de linha\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n\n  // Mantém parágrafos\n  .replace(/\\n{3,}/g, '\\n\\n')\n\n  .trim();\n\nif (!numero) {\n  throw new Error(\n    'Número não encontrado para envio. Campos recebidos: ' +\n    JSON.stringify(Object.keys($json))\n  );\n}\n\nif (!textoResposta) {\n  throw new Error('Texto da resposta vazio');\n}\n\nconst bodyEnvio = {\n  number: numero,\n  text: textoResposta\n};\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `http://evolution:8080/message/sendText/${$env.EVOLUTION_INSTANCE_NAME}`,\n    headers: {\n      apikey: $env.EVOLUTION_API_KEY,\n      'Content-Type': 'application/json'\n    },\n    body: bodyEnvio,\n    json: true\n  });\n\n  return [\n    {\n      json: {\n        ...$json,\n        numero,\n        remoteJid: $json.remoteJid || $json.remote_jid_atual || '',\n        mensagem: $json.mensagem || $json.mensagem_atual || '',\n        pushName: $json.pushName || $json.cliente?.nome || '',\n        textoResposta,\n        enviado: true,\n        bodyEnviado: bodyEnvio,\n        response\n      }\n    }\n  ];\n} catch (error) {\n  return [\n    {\n      json: {\n        ...$json,\n        enviado: false,\n        numero,\n        textoResposta,\n        bodyEnviado: bodyEnvio,\n        erroMensagem: error.message,\n        erroStatus: error.statusCode || error.response?.statusCode,\n        erroBody: error.response?.body || error.error || error.cause || error\n      }\n    }\n  ];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        -96
+      ],
+      "id": "88f9d2d8-c4d0-48c4-80e8-a8328265cbc9",
+      "name": "Enviar mensagem"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO leads_whatsapp (telefone, nome, atualizado_em)\nVALUES (\n  '{{ $json.numero }}',\n  '{{ ($json.nome || $json.pushName || \"Cliente\").replace(/'/g, \"''\") }}',\n  NOW()\n)\nON CONFLICT (telefone) DO UPDATE SET\n  nome = COALESCE(NULLIF('{{ ($json.nome || $json.pushName || \"\").replace(/'/g, \"''\") }}', ''), leads_whatsapp.nome),\n  atualizado_em = NOW()\nRETURNING\n  leads_whatsapp.*,\n  '{{ $json.mensagem.replace(/'/g, \"''\") }}'::text AS mensagem_atual,\n  '{{ $json.remoteJid }}'::text AS remote_jid_atual,\n  '{{ $json.messageId || \"\" }}'::text AS message_id_atual,\n  '{{ $json.tipoMensagem || \"\" }}'::text AS tipo_mensagem_atual,\n  '{{ $json.dataHora || \"\" }}'::text AS data_hora_atual;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        288,
+        0
+      ],
+      "id": "16a44003-c99c-4e43-b6e3-242f43057381",
+      "name": "Criar ou Atualizar Lead",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mensagens_whatsapp (\n  telefone,\n  nome,\n  role,\n  mensagem,\n  message_id,\n  tipo_mensagem\n)\nVALUES (\n  '{{ $json.telefone }}',\n  '{{ ($json.nome || \"Cliente\").replace(/'/g, \"''\") }}',\n  'user',\n  '{{ $json.mensagem_atual.replace(/'/g, \"''\") }}',\n  NULLIF('{{ $json.message_id_atual || \"\" }}', ''),\n  '{{ $json.tipo_mensagem_atual || \"\" }}'\n)\nON CONFLICT (message_id) DO NOTHING;\n\nSELECT\n  '{{ $json.telefone }}'::text AS telefone,\n  '{{ ($json.nome || \"Cliente\").replace(/'/g, \"''\") }}'::text AS nome,\n  '{{ $json.mensagem_atual.replace(/'/g, \"''\") }}'::text AS mensagem_atual,\n  '{{ $json.remote_jid_atual }}'::text AS remote_jid_atual,\n  '{{ $json.message_id_atual || \"\" }}'::text AS message_id_atual,\n  '{{ $json.tipo_mensagem_atual || \"\" }}'::text AS tipo_mensagem_atual;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        448,
+        0
+      ],
+      "id": "83edb473-cbe3-4f27-8f27-fa2023b4e73c",
+      "name": "Salvar mensagem do cliente",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT role, mensagem, created_at\nFROM mensagens_whatsapp\nWHERE telefone = '{{ $json.telefone }}'\nORDER BY created_at DESC\nLIMIT 8;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1104,
+        -96
+      ],
+      "id": "dab5381f-d3e4-49bf-9c1d-110b1f5175db",
+      "name": "Buscar últimas mensagens",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO mensagens_whatsapp (\n  telefone,\n  nome,\n  role,\n  mensagem,\n  message_id,\n  tipo_mensagem\n)\nVALUES (\n  '{{ $json.numero }}',\n  '{{ ($json.pushName || \"Cliente\").replace(/'/g, \"''\") }}',\n  'assistant',\n  '{{ $json.textoResposta.replace(/'/g, \"''\") }}',\n  NULL,\n  'text'\n)\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3248,
+        -96
+      ],
+      "id": "23d641e9-6dd2-4fed-b8a7-3b02136334ba",
+      "name": "Salvar resposta Bot",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.textoResposta) {\n  return [];\n}\n\nconst textoOriginal = String($json.textoResposta || '');\n\nlet textoResposta = textoOriginal\n  // Remove caracteres invisíveis\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n\n  // Remove Markdown/negrito/itálico\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n\n  // Remove qualquer asterisco restante\n  .replace(/\\*/g, '')\n\n  // Remove títulos Markdown\n  .replace(/^#{1,6}\\s+/gm, '')\n\n  // Remove bullets simples no início de linhas\n  .replace(/^\\s*[-•]\\s+/gm, '')\n\n  // Ajusta expressões fora do tom desejado\n  .replace(/\\bopa\\b/gi, 'Olá')\n  .replace(/\\bmassa\\b/gi, 'Perfeito')\n  .replace(/\\btri\\b/gi, 'Ótimo')\n  .replace(/\\bbah\\b/gi, '')\n  .replace(/\\btchê\\b/gi, '')\n  .replace(/\\bshow de bola\\b/gi, 'Perfeito')\n  .replace(/\\btop\\b/gi, 'ótimo')\n  .replace(/\\birado\\b/gi, 'muito bom')\n  .replace(/\\blegal demais\\b/gi, 'muito legal')\n\n  // Remove espaços duplicados, mas mantém quebras de linha\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n\n  // Mantém parágrafos, mas remove excesso de linhas vazias\n  .replace(/\\n{3,}/g, '\\n\\n')\n\n  .trim();\n\nif (!textoResposta) {\n  textoResposta = 'Perfeito. Me conta só mais um detalhe para eu te orientar certinho.';\n}\n\n// Remove nome do cliente no início de respostas repetidas\nconst nomeCliente = String($json.pushName || $json.cliente?.nome || '')\n  .trim()\n  .split(' ')[0];\n\nif (nomeCliente) {\n  const nomeRegex = new RegExp(`^(olá|oi|perfeito|ótimo|certo|entendi|que legal|excelente|boa)[,\\\\s]+${nomeCliente}[!,\\\\.\\\\s]*`, 'i');\n\n  textoResposta = textoResposta\n    .replace(nomeRegex, '$1. ')\n    .replace(new RegExp(`^${nomeCliente}[!,\\\\.\\\\s]+`, 'i'), '')\n    .replace(/[ \\t]{2,}/g, ' ')\n    .trim();\n}\n\nconst limiteCaracteres =\n  $json.tipoResposta === 'catalogo_produtos' ? 1200 :\n  $json.tipoResposta === 'detalhe_segmento' ? 1200 :\n  650;\n\nif (textoResposta.length > limiteCaracteres) {\n  textoResposta = textoResposta.slice(0, limiteCaracteres).trim();\n\n  const ultimoPonto = Math.max(\n    textoResposta.lastIndexOf('.'),\n    textoResposta.lastIndexOf('?'),\n    textoResposta.lastIndexOf('!')\n  );\n\n  if (ultimoPonto > 250) {\n    textoResposta = textoResposta.slice(0, ultimoPonto + 1).trim();\n  }\n}\nconst frasesFreteProibidas = [\n  /seu pedido.*frete grátis/gi,\n  /sua compra.*frete grátis/gi,\n  /esse kit.*frete grátis/gi,\n  /esse produto.*frete grátis/gi,\n  /atinge.*frete grátis/gi,\n  /fecha.*frete grátis/gi,\n  /dá frete grátis/gi,\n  /fica com frete grátis/gi,\n  /vai ter frete grátis/gi,\n  /tem frete grátis para você/gi\n];\n\nconst mencionouFreteGratisIndevido = frasesFreteProibidas.some((regex) =>\n  regex.test(textoResposta)\n);\n\nif (mencionouFreteGratisIndevido) {\n  textoResposta = `Temos política de frete grátis conforme a região:\n\nSul: a partir de R$ 199,00\nSudeste: a partir de R$ 299,00\nDemais regiões: a partir de R$ 849,00\n\nPara confirmar se o seu pedido terá frete grátis, prazo ou valor de entrega, é só simular no carrinho do site.`;\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      numero: $json.numero || $json.telefone || $json.cliente?.telefone || '',\n      textoResposta,\n      textoOriginal\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2624,
+        -96
+      ],
+      "id": "ae0516c4-19a0-4e9b-a5e9-99dd4585dca4",
+      "name": "Limpar resposta final"
+    },
+    {
+      "parameters": {
+        "jsCode": "const mensagemAtual = String($json.mensagem_atual || $json.mensagem || '');\n\nconst texto = mensagemAtual\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .trim();\n\nlet intencao = 'atendimento_geral';\nlet segmentoDetalhe = null;\n\nconst mensagemFacebookLead =\n  texto.includes('ola tenho interesse e queria saber mais informacoes por favor') ||\n  texto.includes('olá tenho interesse e queria saber mais informações por favor') ||\n  texto.includes('tenho interesse e queria saber mais informacoes') ||\n  texto.includes('tenho interesse e queria saber mais informações');\n\n// Detecta saudações simples, mesmo com combinações tipo:\n// \"oi bom dia\", \"oii boa tarde\", \"olá tudo bem\", \"bom dia\"\nconst textoSemPontuacao = texto\n  .replace(/[!?.,;:]/g, '')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst saudacoesPermitidas = [\n  'oi',\n  'oii',\n  'oiii',\n  'ola',\n  'olá',\n  'bom dia',\n  'boa tarde',\n  'boa noite',\n  'tudo bem',\n  'td bem',\n  'oi bom dia',\n  'oii bom dia',\n  'oiii bom dia',\n  'ola bom dia',\n  'olá bom dia',\n  'oi boa tarde',\n  'oii boa tarde',\n  'oiii boa tarde',\n  'ola boa tarde',\n  'olá boa tarde',\n  'oi boa noite',\n  'oii boa noite',\n  'oiii boa noite',\n  'ola boa noite',\n  'olá boa noite',\n  'oi tudo bem',\n  'oii tudo bem',\n  'ola tudo bem',\n  'olá tudo bem',\n  'bom dia tudo bem',\n  'boa tarde tudo bem',\n  'boa noite tudo bem'\n];\n\nconst saudacaoSimples = saudacoesPermitidas.includes(textoSemPontuacao);\n\nconst pediuCatalogo =\n  texto.includes('conhecer os produtos') ||\n  texto.includes('conhecer produtos') ||\n  texto.includes('produtos da suaempresa') ||\n  texto.includes('produtos suaempresa') ||\n  texto.includes('produtos da empresa') ||\n  texto.includes('quais produtos') ||\n  texto.includes('quais linhas') ||\n  texto.includes('catalogo') ||\n  texto.includes('catálogo') ||\n  texto.includes('linhas da suaempresa') ||\n  texto.includes('o que voces vendem') ||\n  texto.includes('o que vocês vendem') ||\n  texto.includes('me apresenta os produtos') ||\n  texto.includes('me mostre os produtos') ||\n  texto.includes('quero ver os produtos') ||\n  texto.includes('trabalham com quais linhas');\n\nif (saudacaoSimples) {\n  intencao = 'saudacao';\n}\n\nif (pediuCatalogo) {\n  intencao = 'catalogo_produtos';\n}\n\nif (mensagemFacebookLead) {\n  intencao = 'lead_facebook_inicial';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      mensagem_detectada: mensagemAtual,\n      texto_normalizado: texto,\n      intencao,\n      segmentoDetalhe\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        -96
+      ],
+      "id": "c9442b61-4808-403f-a018-a77baf73d691",
+      "name": "Detectar intenção"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monta o catálogo a partir da base de produtos, sem chamar a IA.\nconst segmentos = $json.baseProdutos?.segmentos || {};\n\nconst linhas = Object.values(segmentos).map((seg) => {\n  const codigos = (seg.produtos || []).map((p) => p.codigo).join(', ');\n  return `${seg.nome}:\\n${codigos}`;\n});\n\nconst textoResposta = `Que ótimo! Estas são as nossas principais linhas:\\n\\n${linhas.join('\\n\\n')}\\n\\nMe conta qual projeto você quer fazer que eu te indico a melhor opção.`;\n\nreturn [{ json: { ...$json, textoResposta, tipoResposta: 'catalogo_produtos', origemResposta: 'resposta_catalogo_produtos' } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        -352
+      ],
+      "id": "ea63abd6-3c56-4d19-901c-fad38d56313d",
+      "name": "Resposta catálogo produtos"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Base de conhecimento dos produtos.\n// EXEMPLO: troque pelos produtos da sua empresa.\nconst baseProdutos = {\n  segmentos: {\n    linha_basica: {\n      nome: 'Linha Básica',\n      descricao: 'Produtos de entrada, para quem está começando.',\n      produtos: [\n        { codigo: 'PROD-A', indicacao: 'Uso geral, fácil de aplicar, ideal para iniciantes.' },\n        { codigo: 'PROD-B', indicacao: 'Uso geral com acabamento superior.' }\n      ]\n    },\n    linha_profissional: {\n      nome: 'Linha Profissional',\n      descricao: 'Produtos para aplicações técnicas e de alto volume.',\n      produtos: [\n        { codigo: 'PROD-PRO', indicacao: 'Aplicações profissionais que exigem alta resistência.' }\n      ]\n    }\n  }\n};\n\nreturn [{ json: { ...$json, baseProdutos } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        -96
+      ],
+      "id": "f3313358-98e2-428d-bc1e-e0a9f3261ed3",
+      "name": "Base de produtos"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.intencao }}",
+                    "rightValue": "catalogo_produtos",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8211131e-aa20-496e-85f0-ae2a51f6eb4a"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "catalogo_produtos"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a33fd316-62ff-4829-9ecc-91cae4631318",
+                    "leftValue": "={{ $json.intencao }}",
+                    "rightValue": "detalhe_segmento",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "catalogo_produtos"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "702a4397-20d4-4ed4-be87-86b84083ee14",
+                    "leftValue": "={{ $json.intencao }}",
+                    "rightValue": "lead_facebook_inicial",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lead_facebook_inicial"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2112,
+        -112
+      ],
+      "id": "a9cddf26-b9fb-46f3-9beb-7e28b59b1271",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detalha uma linha de produtos a partir da base, sem chamar a IA.\nconst segmentoKey = $json.segmentoDetalhe;\nconst segmento = $json.baseProdutos?.segmentos?.[segmentoKey];\n\nif (!segmentoKey || !segmento) {\n  return [];\n}\n\nconst produtos = (segmento.produtos || [])\n  .map((p) => `${p.codigo}\\n${p.indicacao}`)\n  .join('\\n\\n');\n\nconst textoResposta = `${segmento.nome}: ${segmento.descricao}\\n\\n${produtos}\\n\\nMe conta qual peça você quer fazer que eu te indico a melhor opção.`;\n\nreturn [{ json: { ...$json, textoResposta, tipoResposta: 'detalhe_segmento', origemResposta: 'resposta_detalhe_segmento' } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -144
+      ],
+      "id": "0f02bbd7-a2fa-4e85-a79f-d01cc083f832",
+      "name": "Resposta detalhe segmento"
+    },
+    {
+      "parameters": {
+        "jsCode": "if (!$json.textoResposta) {\n  return [];\n}\n\nlet textoResposta = String($json.textoResposta || '').trim();\n\nconst textoOriginalValidacao = textoResposta;\n\n// 1. Remove caracteres invisíveis\ntextoResposta = textoResposta\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n  .trim();\n\n// 2. Remove Markdown, asteriscos, negrito, itálico e crases\ntextoResposta = textoResposta\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n  .replace(/\\*/g, '')\n  .replace(/^#{1,6}\\s+/gm, '')\n  .trim();\n\n// 3. Corrige gírias/expressões fora do tom\nconst substituicoesTom = [\n  { regex: /^opa[!,.\\s]*/i, replace: 'Olá! ' },\n  { regex: /\\bmassa\\b/gi, replace: 'Perfeito' },\n  { regex: /\\btri\\b/gi, replace: 'Ótimo' },\n  { regex: /\\bbah\\b/gi, replace: '' },\n  { regex: /\\btchê\\b/gi, replace: '' },\n  { regex: /\\bshow de bola\\b/gi, replace: 'Perfeito' },\n  { regex: /\\btop\\b/gi, replace: 'ótimo' },\n  { regex: /\\birado\\b/gi, replace: 'muito bom' },\n  { regex: /\\blegal demais\\b/gi, replace: 'muito legal' }\n];\n\nfor (const item of substituicoesTom) {\n  textoResposta = textoResposta.replace(item.regex, item.replace);\n}\n\n// 4. Bloqueio de links/domínios errados\nconst siteOficial = 'www.suaempresa.com.br';\n\ntextoResposta = textoResposta\n  .replace(/https?:\\/\\/(?:www\\.)?suaempresa\\.store[^\\s]*/gi, siteOficial)\n  .replace(/(?:www\\.)?suaempresa\\.store[^\\s]*/gi, siteOficial)\n  .replace(/https?:\\/\\/(?:www\\.)?suaempresa\\.com[^\\s]*/gi, siteOficial)\n  .replace(/(?:www\\.)?suaempresa\\.com[^\\s]*/gi, siteOficial)\n  .replace(/https?:\\/\\/loja\\.suaempresa[^\\s]*/gi, siteOficial)\n  .replace(/loja\\.suaempresa[^\\s]*/gi, siteOficial);\n\n// Remove/substitui qualquer URL fora do domínio oficial\nconst urls = textoResposta.match(/https?:\\/\\/[^\\s]+|www\\.[^\\s]+/gi) || [];\n\nfor (const url of urls) {\n  const urlNormalizada = url.toLowerCase();\n\n  const ehOficial = urlNormalizada.includes('suaempresa.com.br');\n\n  if (!ehOficial) {\n    textoResposta = textoResposta.replace(url, siteOficial);\n  }\n}\n\n// Corrige domínio solto sem http/www\ntextoResposta = textoResposta\n  .replace(/suaempresa\\.store/gi, siteOficial)\n  .replace(/suaempresa\\.com/gi, siteOficial);\n\n// 5. Trava contra frete grátis indevido\nconst frasesFreteProibidas = [\n  /seu pedido.*frete grátis/gi,\n  /sua compra.*frete grátis/gi,\n  /esse kit.*frete grátis/gi,\n  /esse produto.*frete grátis/gi,\n  /atinge.*frete grátis/gi,\n  /fecha.*frete grátis/gi,\n  /dá frete grátis/gi,\n  /da frete gratis/gi,\n  /fica com frete grátis/gi,\n  /fica com frete gratis/gi,\n  /vai ter frete grátis/gi,\n  /vai ter frete gratis/gi,\n  /tem frete grátis para você/gi,\n  /tem frete gratis para você/gi,\n  /tem frete gratis pra você/gi,\n  /tem frete grátis pra você/gi\n];\n\nconst mencionouFreteGratisIndevido = frasesFreteProibidas.some((regex) =>\n  regex.test(textoResposta)\n);\n\nif (mencionouFreteGratisIndevido) {\n  textoResposta = `Temos política de frete grátis conforme a região:\n\nSul: a partir de R$ 199,00\nSudeste: a partir de R$ 299,00\nDemais regiões: a partir de R$ 849,00\n\nPara confirmar se o seu pedido terá frete grátis, prazo ou valor de entrega, é só simular no carrinho do site:\nwww.suaempresa.com.br`;\n}\n\n// 6. Trava contra valor de frete inventado\nconst falouValorFrete =\n  /frete/i.test(textoResposta) &&\n  /R\\$\\s?\\d+/i.test(textoResposta) &&\n  !/R\\$\\s?199/i.test(textoResposta) &&\n  !/R\\$\\s?299/i.test(textoResposta) &&\n  !/R\\$\\s?849/i.test(textoResposta);\n\nif (falouValorFrete) {\n  textoResposta = `Para frete, seguimos a política de frete grátis:\n\nSul: a partir de R$ 199,00\nSudeste: a partir de R$ 299,00\nDemais regiões: a partir de R$ 849,00\n\nPara confirmar prazo ou valor de entrega, é só simular no carrinho do site:\nwww.suaempresa.com.br`;\n}\n\n// 7. Trava contra prazo inventado\nconst falouPrazoEntrega =\n  /(chega|entrega|recebe|prazo).*?(\\d+\\s?(dias|dia|úteis|uteis))/i.test(textoResposta) ||\n  /(\\d+\\s?(dias|dia|úteis|uteis)).*?(chega|entrega|recebe)/i.test(textoResposta);\n\nif (falouPrazoEntrega) {\n  textoResposta = textoResposta\n    .replace(/[^.!?]*?(chega|entrega|recebe|prazo)[^.!?]*?(\\d+\\s?(dias|dia|úteis|uteis))[^.!?]*[.!?]?/gi, '')\n    .replace(/[^.!?]*?(\\d+\\s?(dias|dia|úteis|uteis))[^.!?]*?(chega|entrega|recebe)[^.!?]*[.!?]?/gi, '')\n    .trim();\n\n  textoResposta += `\\n\\nPara prazo de entrega, é necessário simular no carrinho do site:\\nwww.suaempresa.com.br`;\n}\n\n// 8. Trava contra preço inventado\n// Permite somente valores da política de frete grátis.\n// Se aparecer outro valor em R$, substitui por orientação segura.\nconst valoresEncontrados = textoResposta.match(/R\\$\\s?\\d+(?:[.,]\\d{2})?/g) || [];\n\nconst valoresPermitidos = [\n  'R$ 199,00',\n  'R$199,00',\n  'R$ 299,00',\n  'R$299,00',\n  'R$ 849,00',\n  'R$849,00'\n];\n\nconst temValorNaoPermitido = valoresEncontrados.some((valor) => {\n  const normalizado = valor.replace(/\\s+/g, ' ').trim();\n  return !valoresPermitidos.includes(normalizado);\n});\n\nif (temValorNaoPermitido && !/frete grátis|frete gratis/i.test(textoResposta)) {\n  textoResposta = `Para valores atualizados, o ideal é conferir diretamente no site oficial da Sua Empresa:\n\nwww.suaempresa.com.br\n\nPosso te ajudar indicando o produto correto para o seu projeto.`;\n}\n\n// 9. Trava contra promessa de estoque/disponibilidade\nconst frasesEstoqueProibidas = [\n  /temos em estoque/gi,\n  /tem estoque/gi,\n  /está disponível/gi,\n  /esta disponivel/gi,\n  /pronta entrega/gi,\n  /envio imediato/gi\n];\n\nconst mencionouEstoque = frasesEstoqueProibidas.some((regex) =>\n  regex.test(textoResposta)\n);\n\nif (mencionouEstoque) {\n  textoResposta = textoResposta\n    .replace(/temos em estoque/gi, 'você pode conferir a disponibilidade')\n    .replace(/tem estoque/gi, 'é possível conferir a disponibilidade')\n    .replace(/está disponível/gi, 'pode ter disponibilidade confirmada')\n    .replace(/esta disponivel/gi, 'pode ter disponibilidade confirmada')\n    .replace(/pronta entrega/gi, 'com disponibilidade a confirmar')\n    .replace(/envio imediato/gi, 'com envio a confirmar')\n    .trim();\n}\n\n// 10. Padroniza nomes de produtos escritos com espaços errados\nconst produtosPadronizados = [\n  ['PROD A', 'PROD-A'],\n  ['PROD B', 'PROD-B'],\n  ['PROD PRO', 'PROD-PRO']\n];\n\nfor (const [errado, correto] of produtosPadronizados) {\n  const regex = new RegExp(`\\\\b${errado}\\\\b`, 'gi');\n  textoResposta = textoResposta.replace(regex, correto);\n}\n\n// 11. Remove excesso de espaços sem apagar quebras de linha\ntextoResposta = textoResposta\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\n// 12. Limite final por tipo de resposta\nconst limiteCaracteres =\n  $json.tipoResposta === 'catalogo_produtos' ? 1200 :\n  $json.tipoResposta === 'detalhe_segmento' ? 1200 :\n  $json.tipoResposta === 'lead_facebook_inicial' ? 1200 :\n  750;\n\nif (textoResposta.length > limiteCaracteres) {\n  textoResposta = textoResposta.slice(0, limiteCaracteres).trim();\n\n  const ultimoPonto = Math.max(\n    textoResposta.lastIndexOf('.'),\n    textoResposta.lastIndexOf('?'),\n    textoResposta.lastIndexOf('!')\n  );\n\n  if (ultimoPonto > 250) {\n    textoResposta = textoResposta.slice(0, ultimoPonto + 1).trim();\n  }\n}\n\n// 13. Segurança final\nif (!textoResposta) {\n  textoResposta = 'Perfeito. Me conta só mais um detalhe para eu te orientar certinho.';\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      textoResposta,\n      textoOriginalValidacao,\n      validado: true,\n      dominioValidado: true,\n      siteOficial,\n      origemValidacao: 'validador_final'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        -96
+      ],
+      "id": "101b73f1-c7e8-4c09-a208-521ea3808a34",
+      "name": "Validador final"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Primeira resposta para quem chega por anúncio (mensagem automática do Facebook/Instagram).\nconst textoResposta = `Olá! Seja muito bem-vindo à Sua Empresa 😊\nAqui é a Bia, e será um prazer te atender.\n\nPara te orientar da melhor forma, me conta: qual projeto você tem em mente?\n\nVocê também pode conhecer todos os nossos produtos em:\nwww.suaempresa.com.br`;\n\nreturn [{ json: { ...$json, textoResposta, tipoResposta: 'lead_facebook_inicial', origemResposta: 'resposta_lead_facebook' } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        16
+      ],
+      "id": "0e287286-5459-4bde-a5e6-6c9951f7af22",
+      "name": "Resposta lead Facebook"
+    },
+    {
+      "parameters": {
+        "jsCode": "const siteOficial = 'www.suaempresa.com.br';\n\nconst produtosComerciais = {\n  'PROD-A': {\n    nome: 'PROD-A',\n    tamanhos: ['500g', '1kg'],\n    linksPorTamanho: {\n      '500g': 'https://www.suaempresa.com.br/produtos/prod-a-500g',\n      '1kg': 'https://www.suaempresa.com.br/produtos/prod-a-1kg'\n    },\n    linkCategoria: 'https://www.suaempresa.com.br/linha-basica'\n  },\n  'PROD-PRO': {\n    nome: 'PROD-PRO',\n    tamanhos: ['5kg'],\n    linksPorTamanho: {\n      '5kg': 'https://www.suaempresa.com.br/produtos/prod-pro-5kg'\n    },\n    linkCategoria: 'https://www.suaempresa.com.br/linha-profissional'\n  }\n};\n\nconst aliasesProdutos = {\n  'prod-a': 'PROD-A',\n  'prod a': 'PROD-A',\n  'prod-b': 'PROD-B',\n  'prod b': 'PROD-B',\n  'prod-pro': 'PROD-PRO',\n  'prod pro': 'PROD-PRO'\n};\n\nconst mensagem = String(\n  $json.mensagem_atual ||\n  $json.mensagem ||\n  $json.ultima_mensagem ||\n  ''\n)\n  .toLowerCase()\n  .normalize('NFD')\n  .replace(/[\\u0300-\\u036f]/g, '')\n  .trim();\n\nlet produtoDetectado = '';\n\nfor (const [alias, produto] of Object.entries(aliasesProdutos)) {\n  const aliasNormalizado = alias\n    .toLowerCase()\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '');\n\n  if (mensagem.includes(aliasNormalizado)) {\n    produtoDetectado = produto;\n    break;\n  }\n}\n\nconst produtoComercial = produtoDetectado\n  ? produtosComerciais[produtoDetectado]\n  : null;\n\n// Detecta tamanho citado pelo cliente, aceitando variações tipo:\n// \"1kg\", \"1 kg\", \"1,00kg\", \"1.00kg\"\nlet tamanhoDetectado = '';\n\nif (produtoComercial) {\n  const mensagemNormalizada = mensagem\n    .replace(',', '.')\n    .replace(/\\s+/g, '');\n\n  for (const tamanho of produtoComercial.tamanhos) {\n    const tamanhoNormalizado = tamanho\n      .toLowerCase()\n      .replace(',', '.')\n      .replace(/\\s+/g, '');\n\n    const tamanhoSemZeros = tamanhoNormalizado\n      .replace('1.00kg', '1kg')\n      .replace('3.00kg', '3kg')\n      .replace('6.00kg', '6kg')\n      .replace('7.00kg', '7kg');\n\n    const variacoes = [\n      tamanhoNormalizado,\n      tamanhoSemZeros,\n      tamanhoNormalizado.replace('.', ',')\n    ];\n\n    if (variacoes.some(v => mensagemNormalizada.includes(v))) {\n      tamanhoDetectado = tamanho;\n      break;\n    }\n  }\n}\n\n// Define o link correto\nlet linkProduto = '';\n\n// Se for categoria com link geral, usa o link da categoria\nif (produtoComercial?.linkCategoria) {\n  linkProduto = produtoComercial.linkCategoria;\n}\n\n// Se o cliente citar produto + tamanho, pega o link específico daquele tamanho\nif (\n  produtoComercial &&\n  tamanhoDetectado &&\n  produtoComercial.linksPorTamanho?.[tamanhoDetectado]\n) {\n  linkProduto = produtoComercial.linksPorTamanho[tamanhoDetectado];\n}\n\n// Segurança: só aceita link oficial da Sua Empresa\nif (linkProduto && !linkProduto.toLowerCase().includes('suaempresa.com.br')) {\n  linkProduto = '';\n}\n\n// Links oficiais do produto detectado\nconst linksDoProdutoDetectado = produtoComercial\n  ? {\n      linksPorTamanho: produtoComercial.linksPorTamanho || {},\n      linkCategoria: produtoComercial.linkCategoria || ''\n    }\n  : {};\n\n// Todos os links por produto/categoria\nconst linksProdutos = Object.fromEntries(\n  Object.entries(produtosComerciais).map(([codigo, dados]) => [\n    codigo,\n    {\n      linksPorTamanho: dados.linksPorTamanho || {},\n      linkCategoria: dados.linkCategoria || ''\n    }\n  ])\n);\n\nreturn [\n  {\n    json: {\n      ...$json,\n      siteOficial,\n      produtosComerciais,\n      linksProdutos,\n      produtoDetectado,\n      produtoComercial,\n      tamanhoDetectado,\n      linksDoProdutoDetectado,\n      linkProduto,\n      produtoIndicado: $json.produtoIndicado || produtoDetectado || '',\n      produto_indicado: $json.produto_indicado || produtoDetectado || ''\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -96
+      ],
+      "id": "5cd809bb-53c2-4a80-b3c1-37ae71e95f52",
+      "name": "Base de links oficiais"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        592,
+        0
+      ],
+      "id": "95b25147-d6e6-423f-8c50-2ea1a6d58a5b",
+      "name": "Wait"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH entrada AS (\n  SELECT\n    '{{ ($json.telefone || $json.numero || \"\").replace(/\\D/g, \"\") }}'::text AS telefone,\n    '{{ ($json.message_id || $json.messageId || $json.message_id_atual || \"\").replace(/'/g, \"''\") }}'::text AS message_id,\n    '{{ ($json.mensagem_atual || $json.mensagem || \"\").replace(/'/g, \"''\") }}'::text AS mensagem\n),\n\nultima AS (\n  SELECT\n    id,\n    telefone,\n    message_id,\n    mensagem\n  FROM mensagens_whatsapp\n  WHERE telefone = (SELECT telefone FROM entrada)\n    AND role = 'cliente'\n  ORDER BY id DESC\n  LIMIT 1\n)\n\nSELECT\n  entrada.telefone,\n  entrada.telefone AS numero,\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS \"remoteJid\",\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS remote_jid_atual,\n  '{{ ($json.pushName || $json.push_name || $json.nome || \"Cliente\").replace(/'/g, \"''\") }}'::text AS \"pushName\",\n  entrada.mensagem AS mensagem,\n  entrada.mensagem AS mensagem_atual,\n  entrada.message_id AS message_id_atual,\n\n  CASE\n    WHEN entrada.message_id <> ''\n      AND ultima.message_id = entrada.message_id\n    THEN true\n\n    WHEN entrada.message_id = ''\n      AND ultima.mensagem = entrada.mensagem\n    THEN true\n\n    ELSE false\n  END AS eh_ultima_mensagem\n\nFROM entrada\nLEFT JOIN ultima ON true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        752,
+        0
+      ],
+      "id": "64d1dac6-2ed0-445c-87b4-f0bbc96c327b",
+      "name": "Verificar última mensagem",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Filtrar e Extrair Dados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filtrar e Extrair Dados": {
+      "main": [
+        [
+          {
+            "node": "Criar ou Atualizar Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Buscar últimas mensagens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar contexto": {
+      "main": [
+        [
+          {
+            "node": "Detectar intenção",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chamar IA": {
+      "main": [
+        [
+          {
+            "node": "Limpar resposta final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar mensagem": {
+      "main": [
+        [
+          {
+            "node": "Salvar resposta Bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar ou Atualizar Lead": {
+      "main": [
+        [
+          {
+            "node": "Salvar mensagem do cliente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar mensagem do cliente": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar últimas mensagens": {
+      "main": [
+        [
+          {
+            "node": "Montar contexto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar resposta Bot": {
+      "main": [
+        [
+          {
+            "node": "Salvar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limpar resposta final": {
+      "main": [
+        [
+          {
+            "node": "Validador final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detectar intenção": {
+      "main": [
+        [
+          {
+            "node": "Base de produtos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta catálogo produtos": {
+      "main": [
+        [
+          {
+            "node": "Limpar resposta final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base de produtos": {
+      "main": [
+        [
+          {
+            "node": "Base de links oficiais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Resposta catálogo produtos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta detalhe segmento",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Resposta lead Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chamar IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta detalhe segmento": {
+      "main": [
+        [
+          {
+            "node": "Limpar resposta final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validador final": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resposta lead Facebook": {
+      "main": [
+        [
+          {
+            "node": "Limpar resposta final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Base de links oficiais": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Verificar última mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar última mensagem": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -2,7 +2,7 @@
 
 A Bia é uma agente de IA que atende clientes no WhatsApp 24 horas por dia. Ela responde dúvidas sobre produtos, lembra do histórico da conversa e passa o atendimento para um humano quando é preciso.
 
-Desenvolvi a Bia do zero para uma indústria de resinas de Porto Alegre, que perdia vendas porque recebia muitas mensagens fora do horário comercial. Este repositório traz a infraestrutura e o fluxo de automação. Os dados, os prompts internos e o catálogo da empresa ficaram de fora.
+Desenvolvi a Bia do zero para uma indústria de resinas de Porto Alegre, que perdia vendas porque recebia muitas mensagens fora do horário comercial. Este repositório traz a infraestrutura e o fluxo de automação completo. Os dados, os prompts internos e o catálogo da empresa foram trocados por exemplos genéricos.
 
 ## Como funciona
 
@@ -21,11 +21,14 @@ flowchart LR
 ```
 
 1. O cliente manda uma mensagem e a **Evolution API** recebe pelo WhatsApp.
-2. A Evolution dispara um **webhook** para o **n8n**.
-3. O n8n confere se o bot está ativo para aquele número. Quando um atendente humano assume a conversa, a Bia para de responder.
-4. O n8n busca as últimas mensagens da conversa no **PostgreSQL**.
-5. A **API do Claude** recebe o histórico e a base de conhecimento dos produtos, entende a intenção do cliente e monta a resposta.
-6. A resposta volta pela Evolution API para o WhatsApp do cliente.
+2. A Evolution dispara um **webhook** para o **n8n**, que salva o lead e a mensagem no **PostgreSQL**.
+3. O fluxo espera 10 segundos. Se o cliente mandou várias mensagens seguidas, a Bia responde uma vez só, considerando todas.
+4. O n8n confere se o bot está ativo para aquele número. Quando um atendente humano assume a conversa, a Bia para de responder.
+5. O n8n busca as últimas 8 mensagens e detecta a intenção. Pedidos de catálogo têm resposta pronta. Dúvidas abertas vão para a **API do Claude**, junto com o histórico e a base de produtos.
+6. Um validador limpa a resposta: tira Markdown, troca links inventados pelo site oficial e barra promessas que a empresa não pode cumprir.
+7. A resposta volta pela Evolution API para o WhatsApp do cliente.
+
+O fluxo completo, com os 22 nós, está em [`workflows/`](workflows/).
 
 ## Stack
 
@@ -37,6 +40,8 @@ flowchart LR
 | PostgreSQL 16 | Histórico das conversas e dados do n8n e da Evolution |
 | Redis 7 | Cache da Evolution API |
 | API do Claude (Anthropic) | Entende a mensagem e gera a resposta |
+
+As tabelas de leads e mensagens estão em [`sql/01-schema.sql`](sql/01-schema.sql) e são criadas automaticamente na primeira vez que o Postgres sobe.
 
 ## Como rodar
 
@@ -51,7 +56,7 @@ docker compose up -d
 
 Depois de subir:
 
-1. **n8n:** abra http://localhost:5678, importe o fluxo da pasta `workflows/` e cadastre suas credenciais.
+1. **n8n:** abra http://localhost:5678 e importe o fluxo da pasta `workflows/` (passo a passo no [README do fluxo](workflows/README.md)).
 2. **Evolution API:** crie uma instância e leia o QR Code com o WhatsApp.
 3. **Webhook:** aponte o webhook da instância para a URL do webhook no n8n.
 4. Mande uma mensagem para o número conectado e veja a Bia responder.

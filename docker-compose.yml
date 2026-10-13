@@ -11,6 +11,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
@@ -90,6 +91,11 @@ services:
       DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
       DB_POSTGRESDB_USER: ${POSTGRES_USER}
       DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+      # Variáveis lidas pelo fluxo da Bia (nós de código usam $env)
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME}
     volumes:
       - ./data/n8n:/home/node/.n8n
     extra_hosts:
