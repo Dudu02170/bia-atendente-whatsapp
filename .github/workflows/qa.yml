@@ -16,6 +16,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Docker runtime
+        run: docker info
       - name: Testes Java em PostgreSQL descartavel
         working-directory: qa
         run: mvn --batch-mode --no-transfer-progress test

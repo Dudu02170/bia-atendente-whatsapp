@@ -1,6 +1,6 @@
 package br.eduardoconsul.qa;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.nio.file.*;
 import java.sql.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class BiaDatabaseTest {
   @Test void schemaInicializaBancoVazioEAplicaIntegridade() throws Exception {
     // Sempre um PostgreSQL descartável, sem ler .env ou URLs externas.
-    try(var pg=new PostgreSQLContainer<>("postgres:16-alpine").withDatabaseName("bia_qa").withUsername("qa").withPassword("qa-local-only")) {
+    try(var pg=new PostgreSQLContainer("postgres:16-alpine").withDatabaseName("bia_qa").withUsername("qa").withPassword("qa-local-only")) {
       pg.start();
       try(var c=DriverManager.getConnection(pg.getJdbcUrl(),pg.getUsername(),pg.getPassword());var s=c.createStatement()) {
         String sql=Files.readString(Path.of("../sql/01-schema.sql"));
