@@ -52,4 +52,92 @@ class BiaWorkflowTest {
     });
     assertEquals(List.of("Validador final"),incoming);
   }
+
+  @Test void intencoesUsamSaidasCorretasEFallbackConsultivo() {
+    JsonNode router=nodes.get("Switch");
+    assertNotNull(router,"Switch de intenções ausente");
+    assertEquals("n8n-nodes-base.switch",router.path("type").asText());
+    JsonNode rules=router.path("parameters").path("rules").path("values");
+    String[][] routes={
+      {"catalogo_produtos","Resposta catálogo produtos"},
+      {"detalhe_segmento","Resposta detalhe segmento"},
+      {"lead_facebook_inicial","Resposta lead Facebook"}
+    };
+    assertEquals(routes.length,rules.size(),"Quantidade de regras de intenção");
+    JsonNode outputs=workflow.path("connections").path("Switch").path("main");
+    assertEquals(routes.length+1,outputs.size(),"Regras e saída extra de fallback");
+    for(int i=0;i<routes.length;i++) {
+      JsonNode conditions=rules.get(i).path("conditions").path("conditions");
+      assertEquals(1,conditions.size(),"Condição da rota "+routes[i][0]);
+      JsonNode condition=conditions.get(0);
+      assertEquals("={{ $json.intencao }}",condition.path("leftValue").asText());
+      assertEquals(routes[i][0],condition.path("rightValue").asText(),"Intenção na saída "+i);
+      assertEquals("string",condition.path("operator").path("type").asText());
+      assertEquals("equals",condition.path("operator").path("operation").asText());
+      assertSingleMainTarget(outputs.path(i),routes[i][1],"Switch saída "+i);
+    }
+    assertEquals("extra",router.path("parameters").path("options").path("fallbackOutput").asText());
+    assertSingleMainTarget(outputs.path(routes.length),"Chamar IA","Fallback consultivo");
+  }
+
+  @Test void gateExigeBotAtivoEUltimaMensagemESemSaidaNaRecusa() {
+    JsonNode gate=nodes.get("If");
+    assertNotNull(gate,"Gate de atendimento ausente");
+    assertEquals("n8n-nodes-base.if",gate.path("type").asText());
+    JsonNode config=gate.path("parameters").path("conditions");
+    assertEquals("and",config.path("combinator").asText(),"As duas condições devem ser exigidas");
+    JsonNode conditions=config.path("conditions");
+    assertEquals(2,conditions.size(),"Bot ativo e última mensagem");
+    Set<String> expressions=new HashSet<>();
+    for(JsonNode condition:conditions) {
+      expressions.add(condition.path("leftValue").asText());
+      assertEquals("boolean",condition.path("operator").path("type").asText());
+      assertEquals("true",condition.path("operator").path("operation").asText());
+      assertTrue(condition.path("operator").path("singleValue").asBoolean());
+    }
+    assertEquals(Set.of(
+      "={{ $('Criar ou Atualizar Lead').first().json.bot_ativo }}",
+      "={{ $json.eh_ultima_mensagem }}"
+    ),expressions);
+    JsonNode outputs=workflow.path("connections").path("If").path("main");
+    assertTrue(outputs.isArray(),"Saídas do gate devem ser um array");
+    assertSingleMainTarget(outputs.path(0),"Buscar últimas mensagens","Gate aprovado");
+    for(int i=1;i<outputs.size();i++)
+      assertEquals(0,outputs.get(i).size(),"Gate recusado não deve prosseguir: saída "+i);
+  }
+
+  @Test void nenhumCaminhoDeEnvioContornaFiltrosObrigatorios() {
+    assertTrue(reachesSendWithout(null),"Pré-condição: envio deve ser alcançável");
+    for(String required:List.of("Filtrar e Extrair Dados","If","Validador final")) {
+      JsonNode node=nodes.get(required);
+      assertNotNull(node,"Controle obrigatório ausente: "+required);
+      assertFalse(node.path("disabled").asBoolean(false),"Controle desativado: "+required);
+      assertFalse(reachesSendWithout(required),"Caminho até envio contorna: "+required);
+    }
+  }
+
+  // Traversal checks only exported graph edges; it does not execute n8n conditions.
+  private static boolean reachesSendWithout(String blocked) {
+    Set<String> visited=new HashSet<>();
+    Deque<String> pending=new ArrayDeque<>();
+    pending.add("Webhook");
+    while(!pending.isEmpty()) {
+      String name=pending.removeFirst();
+      if(name.equals(blocked)||!visited.add(name)) continue;
+      if(name.equals("Enviar mensagem")) return true;
+      for(JsonNode outputs:workflow.path("connections").path(name))
+        for(JsonNode branch:outputs) for(JsonNode target:branch)
+          pending.add(target.path("node").asText());
+    }
+    return false;
+  }
+
+  private static void assertSingleMainTarget(JsonNode branch,String expected,String context) {
+    assertTrue(branch.isArray(),context+": saída ausente");
+    assertEquals(1,branch.size(),context+": quantidade de destinos");
+    JsonNode target=branch.get(0);
+    assertEquals(expected,target.path("node").asText(),context+": destino");
+    assertEquals("main",target.path("type").asText(),context+": tipo de conexão");
+    assertEquals(0,target.path("index").asInt(-1),context+": índice da entrada");
+  }
 }
