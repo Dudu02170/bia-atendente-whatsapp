@@ -140,4 +140,34 @@ class BiaWorkflowTest {
     assertEquals("main",target.path("type").asText(),context+": tipo de conexão");
     assertEquals(0,target.path("index").asInt(-1),context+": índice da entrada");
   }
+
+  @Test void referenciasLiteraisNosParametrosApontamParaNosExistentes() {
+    // Static inspection only: literal $('Node') / $("Node") references.
+    // Dynamic node names and n8n expression execution are outside this contract.
+    var reference=java.util.regex.Pattern.compile("\\$\\(\\s*(['\"])([^'\"]+)\\1\\s*\\)");
+    List<String> unresolved=new ArrayList<>();
+    int references=0;
+    for(var source:nodes.entrySet()) {
+      Deque<JsonNode> pending=new ArrayDeque<>();
+      pending.add(source.getValue().path("parameters"));
+      while(!pending.isEmpty()) {
+        JsonNode value=pending.removeFirst();
+        if(value.isTextual()) {
+          var matches=reference.matcher(value.asText());
+          while(matches.find()) {
+            references++;
+            String target=matches.group(2);
+            if(!nodes.containsKey(target))
+              unresolved.add(source.getKey()+" -> "+target);
+          }
+        } else {
+          // Covers nested objects and arrays, including Code, SQL and IF parameters.
+          for(JsonNode child:value) pending.add(child);
+        }
+      }
+    }
+    assertTrue(references>0,"Nenhuma referência literal inspecionada; confira o formato do workflow");
+    assertEquals(List.of(),unresolved,
+      "Referências internas a nós ausentes (origem -> destino). Conexões válidas não garantem expressões válidas.");
+  }
 }
