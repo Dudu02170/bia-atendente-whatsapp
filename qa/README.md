@@ -1,16 +1,21 @@
 # QA de back-end da BIA
-Java 17, Maven 3.9+, JUnit 5, Jackson, JDBC e Testcontainers. Requer Docker em execução.
+Java 17, Maven 3.9+, Node.js 22+, JUnit 5, Jackson, JDBC e Testcontainers. Requer Docker em execução.
 ```sh
 cd qa
 mvn --batch-mode test
 ```
-Cinco testes de contrato estrutural do workflow real: nomes únicos, conexões válidas, entrada POST, caminho completo ao envio e passagem pelo validador final.
+
+Nove testes de contrato estrutural verificam o workflow exportado: identidade/conexões dos nós, entrada POST, caminhos de envio, roteamento, gates e referências literais nos parâmetros.
+
+BiaInputFilterTest executa o JavaScript real do nó "Filtrar e Extrair Dados", extraído do JSON versionado, por meio de um processo Node chamado pelo JUnit. São 14 casos com payloads fictícios: quatro formatos de texto, evento direto com valores padrão e nove rejeições (mensagem própria, broadcast, grupo, lid, JID inválido, texto vazio, áudio sem texto, outro evento e ausência de data).
+O adaptador fornece somente $input.first().json e console.log. A execução tem timeout e não disponibiliza clientes de HTTP, banco, IA ou WhatsApp ao código. Nenhum .env é carregado.
+
 Um teste de integração inicializa o SQL real em PostgreSQL 16 descartável e verifica defaults, unicidade, NOT NULL e chave estrangeira.
-Não carrega .env, não acessa o banco existente, não chama IA, WhatsApp ou Evolution.
-## Defeito encontrado na revisão
-sql/01-schema.sql referencia public.atualizar_timestamp(), mas nenhum arquivo do repositório define essa função. O teste de inicialização deve ficar vermelho até a migração ser corrigida. Não há skip, criação artificial da função ou mudança do SQL para esconder o problema.
-As verificações de integridade posteriores ficam bloqueadas enquanto a inicialização falhar.
+
+## Defeito conhecido
+sql/01-schema.sql referencia public.atualizar_timestamp(), mas nenhum arquivo do repositório define essa função. A inicialização deve permanecer vermelha até a migração ser corrigida. Não há skip nem criação artificial da função. As verificações de integridade posteriores ficam bloqueadas enquanto a inicialização falhar.
+
 ## Limites
-Os testes Jackson verificam a topologia/configuração, não executam os nós do n8n. Ainda não cobrem respostas HTTP do webhook, interpretação das mensagens, IA e entrega WhatsApp. Esses testes exigem uma instância isolada de n8n e serviços controlados.
+Os contratos Jackson são estruturais. Os casos do filtro executam uma unidade de JavaScript com um adaptador mínimo; não executam o runtime, os nós ou as conexões do n8n. Não comprovam recebimento HTTP do webhook, comportamento da IA, execução das consultas do workflow ou entrega no WhatsApp. A integração PostgreSQL usa banco descartável, sem acessar dados reais.
+
 Relatórios JUnit: target/surefire-reports/. CI executa em PRs.
-Referências: https://java.testcontainers.org/modules/databases/postgres/

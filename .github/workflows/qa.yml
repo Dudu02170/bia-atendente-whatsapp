@@ -16,9 +16,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Docker runtime
         run: docker info
-      - name: Testes Java em PostgreSQL descartavel
+      - name: Testes Java, filtro isolado e PostgreSQL descartavel
         working-directory: qa
         run: mvn --batch-mode --no-transfer-progress test
       - name: Relatorios JUnit
