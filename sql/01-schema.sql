@@ -133,6 +133,17 @@ CREATE INDEX idx_mensagens_lead_id ON public.mensagens USING btree (lead_id);
 
 CREATE INDEX idx_mensagens_telefone ON public.mensagens USING btree (telefone);
 
+-- Mantém a data da última edição do lead sem alterar a data de criação.
+CREATE FUNCTION public.atualizar_timestamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.atualizado_em := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
 CREATE TRIGGER trigger_leads_atualizar BEFORE UPDATE ON public.leads FOR EACH ROW EXECUTE FUNCTION public.atualizar_timestamp();
 
 ALTER TABLE ONLY public.mensagens
