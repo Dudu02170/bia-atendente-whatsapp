@@ -29,3 +29,6 @@ O nó Filtrar e Extrair Dados descarta estruturas/tipos malformados antes de ace
 
 ## Verificação da última entrada
 Salvar mensagem do cliente grava role=user; Verificar última mensagem usa o mesmo papel, ordenando pelo ID e ignorando respostas assistant. A decisão compara message_id quando presente e conserva o fallback por texto quando ausente. A correção não muda o gate que também exige bot ativo. Os testes Java executam as consultas reais em banco descartável, sem executar o runtime n8n nem enviar mensagens. A prevenção completa de duplicidade e recuperação após falhas ainda é pendência em ../qa/KNOWN_ISSUES.md.
+
+## Preservação dos metadados na entrada SQL
+Criar ou Atualizar Lead e Salvar mensagem do cliente escapam apóstrofos de messageId/tipoMensagem ao gerar literais SQL, como já fazem para nome e texto. IDs e tipos textuais mantêm seu conteúdo original nos retornos e no histórico. ID vazio continua NULL no banco; a unicidade existente não impede que o fluxo responda novamente ao mesmo evento. Os testes dessas consultas usam PostgreSQL descartável; não validam o runtime n8n ou outras consultas do workflow.

@@ -83,6 +83,67 @@ class BiaLatestMessageTest {
     try (var s = db.createStatement()) { s.execute(render("Salvar mensagem do cliente", input)); }
   }
 
+  @ParameterizedTest(name="metadados: {0}")
+  @CsvSource(value={
+    "ID com apóstrofo|qa'id|conversation",
+    "tipo com apóstrofo|qa-type|tipo'QA",
+    "ambos com apóstrofos|qa''id|tipo''QA",
+    "defaults legados|<empty>|<empty>"
+  }, delimiter='|', quoteCharacter='"')
+  void metadataSurvivesLeadAndMessageQueries(String scenario, String id, String type) throws Exception {
+    if (id.equals("<empty>")) id = "";
+    if (type.equals("<empty>")) type = "";
+    String phone = "550000000004", name = "Cliente D'Ávila QA", message = "Mensagem 'fictícia' QA";
+    var input = Map.of("numero", phone, "nome", name, "pushName", name,
+      "mensagem", message, "remoteJid", phone + "@s.whatsapp.net", "messageId", id,
+      "tipoMensagem", type, "dataHora", "2026-11-21T12:00:00.000Z");
+    var expected = Map.of("telefone", phone, "nome", name, "mensagem_atual", message,
+      "remote_jid_atual", phone + "@s.whatsapp.net", "message_id_atual", id, "tipo_mensagem_atual", type);
+
+    var lead = output("Criar ou Atualizar Lead", input);
+    assertEquals(expected, lead, scenario + ": retorno do lead preserva os valores originais");
+    assertEquals(expected, output("Salvar mensagem do cliente", lead), scenario + ": retorno da gravação");
+    assertEquals(expected, output("Salvar mensagem do cliente", lead), scenario + ": reenvio do mesmo ID");
+
+    try (var s = db.prepareStatement("SELECT nome,role,mensagem,message_id,tipo_mensagem FROM mensagens_whatsapp WHERE telefone=? ORDER BY id")) {
+      s.setString(1, phone);
+      try (var rs = s.executeQuery()) {
+        int count = 0;
+        while (rs.next()) {
+          count++;
+          assertEquals(name, rs.getString("nome")); assertEquals("user", rs.getString("role"));
+          assertEquals(message, rs.getString("mensagem"));
+          assertEquals(id.isEmpty() ? null : id, rs.getString("message_id"));
+          assertEquals(type, rs.getString("tipo_mensagem"));
+        }
+        assertEquals(id.isEmpty() ? 2 : 1, count,
+          "Preserva unicidade de IDs e conversão do ID vazio para NULL; não comprova idempotência do fluxo");
+      }
+    }
+    try (var s = db.createStatement(); var rs = s.executeQuery("SELECT count(*) FROM mensagens_whatsapp WHERE telefone <> '550000000004'")) {
+      assertTrue(rs.next()); assertEquals(4, rs.getInt(1), "Histórico dos outros telefones preservado");
+    }
+  }
+
+  // JDBC consumes the INSERT count then the actual SELECT result from the exported writer.
+  private static Map<String,String> output(String node, Map<String,String> input) throws Exception {
+    try (var s = db.createStatement()) {
+      boolean result = s.execute(render(node, input));
+      while (!result) {
+        assertNotEquals(-1, s.getUpdateCount(), "Consulta deve produzir uma saída: " + node);
+        result = s.getMoreResults();
+      }
+      try (var rs = s.getResultSet()) {
+        assertTrue(rs.next());
+        Map<String,String> row = new LinkedHashMap<>();
+        for (String key : List.of("telefone", "nome", "mensagem_atual", "remote_jid_atual", "message_id_atual", "tipo_mensagem_atual"))
+          row.put(key, rs.getString(key));
+        assertFalse(rs.next());
+        return row;
+      }
+    }
+  }
+
   private static String render(String node, Map<String,String> input) throws Exception {
     String query = Objects.requireNonNull(queries.get(node), "Consulta ausente: " + node);
     Process process = new ProcessBuilder("node", "support/render-query.cjs").start();
