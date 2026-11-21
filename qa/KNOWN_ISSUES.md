@@ -19,3 +19,14 @@ Como testar: `cd qa && mvn --batch-mode --no-transfer-progress test`, com Java 1
 A correção parte do PR #1 (`qa/test-automation`), ainda aberto; revisar a suíte primeiro e depois retargetar a correção para main. Não duplica os commits de testes.
 O SQL inicializa banco novo e não é uma migração para instalações existentes. Nenhum volume ou banco real é alterado. Os testes PostgreSQL executam SQL real em containers descartáveis. Os contratos do workflow e o adaptador do filtro não executam o runtime/nós do n8n, nem integram WhatsApp, Evolution ou IA.
 Próxima pendência funcional: inspecionar a prevenção de processamento duplicado no workflow e só então definir uma mudança pequena com regressão isolada. A unicidade de `message_id` no banco não comprova idempotência do fluxo inteiro.
+
+## QA-BIA-002 — Tipos inesperados causam exceção no filtro de entrada
+Reconfirmado na versão f39a2e8 com o código exportado e dados fictícios: remoteJid=123 lança TypeError em includes; conversation=123 lança TypeError em trim; messageTimestamp=invalido lança RangeError em toISOString. A validação antiga de domínio por includes também aceita um sufixo de outro domínio e pode produzir um número a partir de JID textual inválido.
+
+Correção proposta: verificar estruturas e tipos antes dos métodos, exigir JID numérico com domínio exato e validar o Date antes de gerar ISO. Retornar array vazio em entrada malformada; preservar os quatro formatos de texto, defaults e rejeições existentes. Timestamp numérico em texto continua aceito, normalizado para número. Não altera os outros nós, conexões ou parâmetros do workflow.
+
+Critérios Java: 23 entradas malformadas devem retornar zero itens sem erro de execução; o timestamp textual deve manter instante e mensagem esperados; os 14 cenários anteriores devem continuar ativos. A suíte completa tem 49 casos: 38 de filtro isolado, 9 estruturais e 2 PostgreSQL reais em containers descartáveis.
+
+Evidência local: 23/23 descartadas após correção, contra 16 casos que falhavam ou eram aceitos indevidamente antes; quatro formatos válidos e timestamp textual preservados. Os resultados Java/SQL finais ficam no PR #2, cuja branch já contém a correção de QA-BIA-001.
+
+Limites: executar o código do nó em processo Node chamado pelo JUnit não executa o runtime/nós/conexões n8n, webhook HTTP, Evolution, IA ou WhatsApp. Não valida existência do número nem idempotência do workflow. Eventos sem messageId mantêm o comportamento anterior; antes de implementar prevenção de duplicidade, inspecionar como o identificador é gravado e usado nos nós de SQL/roteamento, com regressão e serviços isolados. Nenhum dado real é modificado.

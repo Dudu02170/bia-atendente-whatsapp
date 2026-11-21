@@ -23,3 +23,6 @@
 | Responder | Catálogo, detalhe de linha e lead de anúncio têm respostas prontas; o resto vai para Chamar IA (Claude) |
 | Revisar | Limpar resposta final → Validador final (remove Markdown, links inventados e promessas que a empresa não pode cumprir) |
 | Enviar | Enviar mensagem (Evolution API) → Salvar resposta Bot → Salvar mensagem |
+
+## Validação da entrada
+O nó Filtrar e Extrair Dados descarta estruturas/tipos malformados antes de acessar texto, JID e timestamp. Aceita os formatos já suportados (conversation, texto estendido e legendas de imagem/vídeo), com JID numérico no domínio exato @s.whatsapp.net. O timestamp pode ser número ou texto numérico representável por Date e sai normalizado como número. Esse filtro não verifica a existência do número nem substitui a prevenção de processamento duplicado. Regressões e limites estão em ../qa/README.md.

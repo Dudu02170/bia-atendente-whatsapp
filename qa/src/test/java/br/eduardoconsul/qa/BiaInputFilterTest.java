@@ -109,6 +109,71 @@ class BiaInputFilterTest {
     return event;
   }
 
+  @ParameterizedTest(name = "rejeita entrada malformada: {0}")
+  @MethodSource("invalidEvents")
+  void rejeitaEntradaMalformadaSemLancarExcecaoOuGerarSaida(String reason, JsonNode input) throws Exception {
+    assertEquals(0, runFilter(input).size(), reason);
+  }
+
+  static Stream<Arguments> invalidEvents() {
+    var nodes = JSON.getNodeFactory();
+    return Stream.of(
+      Arguments.of("entrada nula", nodes.nullNode()),
+      Arguments.of("entrada textual", nodes.textNode("QA")),
+      Arguments.of("body em array", JSON.createObjectNode().set("body", JSON.createArrayNode())),
+      Arguments.of("data numérico", withDataValue(null, nodes.numberNode(123))),
+      Arguments.of("data em array", withDataValue(null, JSON.createArrayNode())),
+      Arguments.of("key numérica", withDataValue("key", nodes.numberNode(123))),
+      Arguments.of("key em array", withDataValue("key", JSON.createArrayNode())),
+      Arguments.of("message textual", withDataValue("message", nodes.textNode("QA"))),
+      Arguments.of("JID numérico", withKeyValue("remoteJid", nodes.numberNode(123))),
+      Arguments.of("JID em objeto", withKeyValue("remoteJid", JSON.createObjectNode())),
+      Arguments.of("texto numérico", withConversation(nodes.numberNode(123))),
+      Arguments.of("texto em objeto", withConversation(JSON.createObjectNode())),
+      Arguments.of("timestamp não numérico", withDataValue("messageTimestamp", nodes.textNode("invalido"))),
+      Arguments.of("timestamp fora do intervalo de Date", withDataValue("messageTimestamp", nodes.numberNode(1e30))),
+      Arguments.of("timestamp em objeto", withDataValue("messageTimestamp", JSON.createObjectNode())),
+      Arguments.of("timestamp vazio", withDataValue("messageTimestamp", nodes.textNode("   "))),
+      Arguments.of("JID sem número", withJid("@s.whatsapp.net")),
+      Arguments.of("JID com sufixo de outro domínio", withJid("550000000001@s.whatsapp.net.example.test")),
+      Arguments.of("JID com prefixo textual", withJid("qa550000000001@s.whatsapp.net")),
+      Arguments.of("fromMe textual", withKeyValue("fromMe", nodes.textNode("true"))),
+      Arguments.of("pushName em objeto", withDataValue("pushName", JSON.createObjectNode())),
+      Arguments.of("messageId em array", withKeyValue("id", JSON.createArrayNode())),
+      Arguments.of("tipo numérico", withDataValue("messageType", nodes.numberNode(123)))
+    );
+  }
+
+  @Test void preservaTimestampNumericoEmTextoNormalizandoParaNumero() throws Exception {
+    ObjectNode event = withDataValue("messageTimestamp", JSON.getNodeFactory().textNode("1700000000"));
+    JsonNode result = runFilter(event);
+    assertEquals(1, result.size());
+    JsonNode output = result.get(0).path("json");
+    assertTrue(output.path("timestamp").isNumber());
+    assertEquals(1700000000L, output.path("timestamp").asLong());
+    assertEquals("2023-11-14T22:13:20.000Z", output.path("dataHora").asText());
+    assertEquals("Olá QA", output.path("mensagem").asText());
+  }
+
+  private static ObjectNode withDataValue(String field, JsonNode value) {
+    ObjectNode event = validEvent();
+    if (field == null) event.set("data", value);
+    else ((ObjectNode) event.path("data")).set(field, value);
+    return event;
+  }
+
+  private static ObjectNode withKeyValue(String field, JsonNode value) {
+    ObjectNode event = validEvent();
+    ((ObjectNode) event.path("data").path("key")).set(field, value);
+    return event;
+  }
+
+  private static ObjectNode withConversation(JsonNode value) {
+    ObjectNode event = validEvent();
+    ((ObjectNode) event.path("data").path("message")).set("conversation", value);
+    return event;
+  }
+
   private static ObjectNode withJid(String jid) {
     ObjectNode event = validEvent();
     ((ObjectNode) event.path("data").path("key")).put("remoteJid", jid);
