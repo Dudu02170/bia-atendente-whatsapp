@@ -13,7 +13,7 @@ O inicializador define a função antes do gatilho. Em cada UPDATE de `public.le
 - Editar um lead com datas históricas fixas e verificar `atualizado_em` igual ao horário do banco na transação, mesmo se a edição fornecer uma data antiga.
 - Preservar `criado_em`, cidade, status, bot ativo, outro lead e a contagem de registros.
 
-Como testar: `cd qa && mvn --batch-mode --no-transfer-progress test`, com Java 17, Maven, Node 22 e Docker. A suíte contém 25 casos, sem skips previstos. A evidência final do GitHub Actions fica no PR da correção; não se considera validado antes de conferir o resultado.
+Como testar: `cd qa && mvn --batch-mode --no-transfer-progress test`, com Java 17, Maven, Node 22 e Docker. O total vigente e o escopo estão em qa/README.md, sem skips previstos. A evidência final do GitHub Actions fica no PR da correção; não se considera validado antes de conferir o resultado.
 
 ## Continuidade e limites
 A correção parte do PR #1 (`qa/test-automation`), ainda aberto; revisar a suíte primeiro e depois retargetar a correção para main. Não duplica os commits de testes.
@@ -30,3 +30,10 @@ Critérios Java: 23 entradas malformadas devem retornar zero itens sem erro de e
 Evidência local: 23/23 descartadas após correção, contra 16 casos que falhavam ou eram aceitos indevidamente antes; quatro formatos válidos e timestamp textual preservados. Os resultados Java/SQL finais ficam no PR #2, cuja branch já contém a correção de QA-BIA-001.
 
 Limites: executar o código do nó em processo Node chamado pelo JUnit não executa o runtime/nós/conexões n8n, webhook HTTP, Evolution, IA ou WhatsApp. Não valida existência do número nem idempotência do workflow. Eventos sem messageId mantêm o comportamento anterior; antes de implementar prevenção de duplicidade, inspecionar como o identificador é gravado e usado nos nós de SQL/roteamento, com regressão e serviços isolados. Nenhum dado real é modificado.
+
+## QA-BIA-003 — Papel incompatível bloqueia a verificação da última mensagem
+Inspeção em 21/11/2026, versão 89ef5a5: Salvar mensagem do cliente insere role=user; Verificar última mensagem filtra role=cliente. Assim, mesmo a última entrada gravada não é encontrada e eh_ultima_mensagem fica falso. Correção: selecionar role=user, sem mudar os gates ou as conexões.
+
+Aceitação: a última entrada do telefone deve produzir true, ignorando mensagens posteriores assistant e de outro telefone; ID antigo/desconhecido e telefone sem histórico devem produzir false; fallback textual sem ID mantém o comportamento anterior. Preservar os campos usados pelos próximos nós e não modificar o histórico. Os sete cenários Java executam as consultas reais exportadas em PostgreSQL 16 descartável, com adaptador mínimo de expressões $json. Total vigente: 56 testes; evidência final no PR #2/Actions, sem alegar execução do n8n.
+
+Entregue nesta etapa: correção da consulta e regressão do agrupamento por última entrada. Próxima pendência: impedir que eventos duplicados prossigam após o INSERT, hoje seguido por SELECT incondicional. A constraint unique não garante idempotência do fluxo; definir recuperação de falhas antes de implementar esse controle. Também permanecem fora do escopo validação de integrações externas e demais consultas de saída. Como testar: cd qa && mvn --batch-mode --no-transfer-progress test, com Java 17, Node 22 e Docker.

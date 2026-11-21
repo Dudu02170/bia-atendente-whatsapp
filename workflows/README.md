@@ -16,7 +16,7 @@
 | --- | --- |
 | Receber | Webhook → Filtrar e Extrair Dados (só mensagens recebidas, ignora as enviadas pelo próprio número) |
 | Registrar | Criar ou Atualizar Lead → Salvar mensagem do cliente |
-| Agrupar | Wait (10 s) → Verificar última mensagem: se o cliente mandou várias mensagens seguidas, responde só uma vez, considerando todas |
+| Agrupar | Wait (10 s) → Verificar última mensagem: seleciona a última entrada do telefone com role=user; entradas antigas não passam pela comparação. Não garante idempotência de eventos repetidos |
 | Checar humano | If: segue apenas se `bot_ativo` for verdadeiro para aquele lead |
 | Contexto | Buscar últimas mensagens (8) → Montar contexto |
 | Entender | Detectar intenção → Base de produtos → Base de links oficiais → Switch |
@@ -26,3 +26,6 @@
 
 ## Validação da entrada
 O nó Filtrar e Extrair Dados descarta estruturas/tipos malformados antes de acessar texto, JID e timestamp. Aceita os formatos já suportados (conversation, texto estendido e legendas de imagem/vídeo), com JID numérico no domínio exato @s.whatsapp.net. O timestamp pode ser número ou texto numérico representável por Date e sai normalizado como número. Esse filtro não verifica a existência do número nem substitui a prevenção de processamento duplicado. Regressões e limites estão em ../qa/README.md.
+
+## Verificação da última entrada
+Salvar mensagem do cliente grava role=user; Verificar última mensagem usa o mesmo papel, ordenando pelo ID e ignorando respostas assistant. A decisão compara message_id quando presente e conserva o fallback por texto quando ausente. A correção não muda o gate que também exige bot ativo. Os testes Java executam as consultas reais em banco descartável, sem executar o runtime n8n nem enviar mensagens. A prevenção completa de duplicidade e recuperação após falhas ainda é pendência em ../qa/KNOWN_ISSUES.md.

@@ -10,7 +10,7 @@ Nove testes de contrato estrutural verificam o workflow exportado: identidade/co
 BiaInputFilterTest executa o JavaScript real do nó "Filtrar e Extrair Dados", extraído do JSON versionado, por meio de um processo Node chamado pelo JUnit. São 38 casos com payloads fictícios: os 14 anteriores (quatro formatos de texto, evento direto/defaults e nove rejeições) mais 23 entradas malformadas e um timestamp numérico recebido como texto. Os casos novos exigem descarte sem exceção de formatos/tipos inválidos, JID sem número/domínio exato e timestamp não representável.
 O adaptador fornece somente $input.first().json e console.log. A execução tem timeout e não disponibiliza clientes de HTTP, banco, IA ou WhatsApp ao código. Nenhum .env é carregado.
 
-Dois testes de integração usam o SQL real em PostgreSQL 16 descartável: inicialização/defaults, unicidade, NOT NULL e chave estrangeira; e edição de um lead com atualização automática de `atualizado_em`, preservando `criado_em`, os demais campos e outro lead. A data antiga é fixa, sem sleeps; o teste compara o novo timestamp com o horário da mesma transação no banco. Total da suíte: 49 casos (9 contratos, 38 entradas e 2 integrações PostgreSQL).
+Dois testes de integração usam o SQL real em PostgreSQL 16 descartável: inicialização/defaults, unicidade, NOT NULL e chave estrangeira; e edição de um lead com atualização automática de `atualizado_em`, preservando `criado_em`, os demais campos e outro lead. A data antiga é fixa, sem sleeps; o teste compara o novo timestamp com o horário da mesma transação no banco. Além desses dois casos, BiaLatestMessageTest acrescenta sete cenários PostgreSQL das consultas reais de gravação e última mensagem. Total da suíte: 56 casos (9 contratos, 38 entradas e 9 cenários PostgreSQL).
 
 ## Correção de QA-BIA-001
 `sql/01-schema.sql` define agora `public.atualizar_timestamp()` antes do gatilho. O schema deve inicializar sem intervenção do teste; as asserções originais de integridade permanecem ativas. O teste adicional verifica o comportamento do gatilho real, inclusive quando a edição tenta fornecer um timestamp antigo. Resultado remoto e evidências no PR da correção.
@@ -18,7 +18,7 @@ Dois testes de integração usam o SQL real em PostgreSQL 16 descartável: inici
 O SQL é um inicializador de banco vazio, executado pelo container somente na primeira criação do volume. Não é uma migração para bancos existentes; esta entrega não executa SQL nem recria volumes de produção.
 
 ## Limites
-Os contratos Jackson são estruturais. Os casos do filtro executam uma unidade de JavaScript com um adaptador mínimo; não executam o runtime, os nós ou as conexões do n8n. Não comprovam recebimento HTTP do webhook, comportamento da IA, execução das consultas do workflow ou entrega no WhatsApp. A integração PostgreSQL usa banco descartável, sem acessar dados reais.
+Os contratos Jackson são estruturais. Os casos do filtro executam uma unidade de JavaScript com um adaptador mínimo; não executam o runtime, os nós ou as conexões do n8n. Não comprovam recebimento HTTP do webhook, comportamento da IA, execução dos nós SQL pelo n8n ou entrega no WhatsApp. A integração PostgreSQL usa banco descartável, sem acessar dados reais.
 
 Relatórios JUnit: target/surefire-reports/. CI executa em PRs.
 
@@ -26,3 +26,10 @@ Relatórios JUnit: target/surefire-reports/. CI executa em PRs.
 O código real do filtro agora verifica os objetos de entrada/data/key/message, os tipos de JID/texto/metadados e a representação do timestamp antes de chamar métodos de string/data. O JID deve conter somente dígitos e o domínio exato @s.whatsapp.net; não é uma validação de titularidade ou existência do número. Timestamp numérico em texto continua aceito e é normalizado para número. Campo ausente mantém os defaults existentes.
 
 Antes da correção, a execução local do código exportado reproduziu TypeError para JID/texto numéricos e RangeError para timestamp inválido. No conjunto novo de 23 entradas, 16 falhavam ou eram aceitas indevidamente; após a correção, 23/23 foram descartadas sem exceção. Os quatro formatos válidos e o timestamp textual também passaram na verificação local. Essa execução não é runtime n8n; a suíte Java completa deve ser conferida no Actions do PR #2. Maven/Docker não foram executados no terminal local.
+
+## QA-BIA-003 — Última mensagem recebida não liberava o gate
+A consulta Verificar última mensagem procurava role=cliente, embora Salvar mensagem do cliente grave role=user. Agora busca user, preservando telefone, ordenação por ID, comparação pelo identificador e fallback textual para entradas sem ID.
+
+BiaLatestMessageTest executa as duas consultas extraídas do workflow em PostgreSQL 16 descartável. Sete cenários: ID atual, ID antigo, ID desconhecido com mesmo texto, outro telefone, telefone sem histórico e fallback sem ID com texto atual/antigo. Uma resposta assistant inserida depois das entradas não deve interferir. Confere os campos devolvidos e que a consulta não modifica o histórico. A mensagem contém aspas para verificar o escape existente.
+
+support/render-query.cjs avalia somente as expressões JavaScript exportadas que usam $json fictício; o JDBC executa o SQL resultante. Isso testa SQL real, mas não implementa nem valida o motor de expressões, item linking, Wait, gate ou demais nós do n8n. Não comprova idempotência: o INSERT ignora ID duplicado, mas seu SELECT posterior ainda emite a entrada. Sem ID, continua a comparação textual anterior. Nenhum envio é realizado. Executar a suíte pelo comando acima; evidência final no Actions do PR #2.
