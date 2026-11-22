@@ -28,7 +28,7 @@ flowchart LR
 6. Um validador limpa a resposta: tira Markdown, troca links inventados pelo site oficial e barra promessas que a empresa não pode cumprir.
 7. A resposta volta pela Evolution API para o WhatsApp do cliente.
 
-O fluxo completo, com os 22 nós, está em [`workflows/`](workflows/).
+O fluxo completo, com os 23 nós, está em [`workflows/`](workflows/).
 
 ## Stack
 

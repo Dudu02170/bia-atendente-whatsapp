@@ -1,6 +1,6 @@
 # Fluxo do n8n
 
-`bia-atendimento.json` é o fluxo completo da Bia, com 22 nós.
+`bia-atendimento.json` é o fluxo completo da Bia, com 23 nós.
 
 ## Como importar
 
@@ -22,7 +22,7 @@
 | Entender | Detectar intenção → Base de produtos → Base de links oficiais → Switch |
 | Responder | Catálogo, detalhe de linha e lead de anúncio têm respostas prontas; o resto vai para Chamar IA (Claude) |
 | Revisar | Limpar resposta final → Validador final (remove Markdown, links inventados e promessas que a empresa não pode cumprir) |
-| Enviar | Enviar mensagem (Evolution API) → Salvar resposta Bot → Salvar mensagem |
+| Enviar | Enviar mensagem (Evolution API) → Envio confirmado → Salvar resposta Bot → Salvar mensagem |
 
 ## Validação da entrada
 O nó Filtrar e Extrair Dados descarta estruturas/tipos malformados antes de acessar texto, JID e timestamp. Aceita os formatos já suportados (conversation, texto estendido e legendas de imagem/vídeo), com JID numérico no domínio exato @s.whatsapp.net. O timestamp pode ser número ou texto numérico representável por Date e sai normalizado como número. Esse filtro não verifica a existência do número nem substitui a prevenção de processamento duplicado. Regressões e limites estão em ../qa/README.md.
@@ -32,3 +32,6 @@ Salvar mensagem do cliente grava role=user; Verificar última mensagem usa o mes
 
 ## Preservação dos metadados na entrada SQL
 Criar ou Atualizar Lead e Salvar mensagem do cliente escapam apóstrofos de messageId/tipoMensagem ao gerar literais SQL, como já fazem para nome e texto. IDs e tipos textuais mantêm seu conteúdo original nos retornos e no histórico. ID vazio continua NULL no banco; a unicidade existente não impede que o fluxo responda novamente ao mesmo evento. Os testes dessas consultas usam PostgreSQL descartável; não validam o runtime n8n ou outras consultas do workflow.
+
+## Falhas de envio
+Envio confirmado exige o booleano enviado=true retornado por Enviar mensagem antes de alcançar Salvar resposta Bot e Salvar mensagem. A saída false fica sem conexão: a informação de erro continua na saída do remetente para inspeção da execução, sem gravar uma resposta como enviada. Não há retry automático. O sinal é o resultado do remetente existente, não uma confirmação de entrega/leitura do WhatsApp. Os testes do remetente usam HTTP simulado e os testes do gate inspecionam o grafo; não são execução n8n ou integração Evolution.

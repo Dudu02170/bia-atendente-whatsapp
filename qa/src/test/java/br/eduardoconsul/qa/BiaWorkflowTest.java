@@ -17,6 +17,39 @@ class BiaWorkflowTest {
     assertEquals(workflow.path("nodes").size(),nodes.size());
     assertFalse(nodes.containsKey(""));
   }
+
+  @Test void somenteEnvioConfirmadoAlcancaPersistenciaDaResposta() {
+    JsonNode gate=nodes.get("Envio confirmado");
+    assertNotNull(gate); assertEquals("n8n-nodes-base.if",gate.path("type").asText());
+    assertFalse(gate.path("disabled").asBoolean());
+    JsonNode config=gate.path("parameters").path("conditions");
+    assertEquals("strict",config.path("options").path("typeValidation").asText());
+    assertFalse(gate.path("parameters").path("looseTypeValidation").asBoolean());
+    JsonNode conditions=config.path("conditions"); assertEquals(1,conditions.size());
+    JsonNode condition=conditions.get(0);
+    assertEquals("={{ $json.enviado }}",condition.path("leftValue").asText());
+    assertEquals("boolean",condition.path("operator").path("type").asText());
+    assertEquals("true",condition.path("operator").path("operation").asText());
+    assertTrue(condition.path("operator").path("singleValue").asBoolean());
+    assertSingleMainTarget(workflow.path("connections").path("Enviar mensagem").path("main").path(0),"Envio confirmado","Resultado do envio");
+    JsonNode outputs=workflow.path("connections").path("Envio confirmado").path("main");
+    assertEquals(2,outputs.size());
+    assertSingleMainTarget(outputs.path(0),"Salvar resposta Bot","Envio aprovado");
+    assertEquals(0,outputs.path(1).size(),"Falha não deve persistir resposta nem histórico de envio");
+  }
+
+  @Test void persistenciaNaoTemCaminhoQueContorneConfirmacao() {
+    Set<String> visited=new HashSet<>(); Deque<String> pending=new ArrayDeque<>(); pending.add("Webhook");
+    while(!pending.isEmpty()) {
+      String name=pending.removeFirst();
+      if(name.equals("Envio confirmado")||!visited.add(name)) continue;
+      for(JsonNode outputs:workflow.path("connections").path(name))
+        for(JsonNode branch:outputs) for(JsonNode target:branch) pending.add(target.path("node").asText());
+    }
+    assertFalse(visited.contains("Salvar resposta Bot"));
+    assertFalse(visited.contains("Salvar mensagem"));
+    assertSingleMainTarget(workflow.path("connections").path("Salvar resposta Bot").path("main").path(0),"Salvar mensagem","Caminho de sucesso preservado");
+  }
   @Test void conexoesReferenciamNosExistentes() {
     var source=workflow.path("connections").fields();
     while(source.hasNext()) {
