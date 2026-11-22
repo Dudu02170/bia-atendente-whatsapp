@@ -35,3 +35,6 @@ Criar ou Atualizar Lead e Salvar mensagem do cliente escapam apóstrofos de mess
 
 ## Falhas de envio
 Envio confirmado exige o booleano enviado=true retornado por Enviar mensagem antes de alcançar Salvar resposta Bot e Salvar mensagem. A saída false fica sem conexão: a informação de erro continua na saída do remetente para inspeção da execução, sem gravar uma resposta como enviada. Não há retry automático. O sinal é o resultado do remetente existente, não uma confirmação de entrega/leitura do WhatsApp. Os testes do remetente usam HTTP simulado e os testes do gate inspecionam o grafo; não são execução n8n ou integração Evolution.
+
+## Histórico após gravação da resposta
+Salvar mensagem recebe a linha retornada por Salvar resposta Bot e usa telefone/mensagem; a mensagem recebida vem do filtro. Apóstrofos dos textos são escapados. Entrada/saída são gravadas juntas em uma instrução INSERT; falha de uma linha rejeita o par. O vínculo procura leads pelo telefone e mantém NULL quando não há lead nessa tabela. Isso não torna atômicos o envio, a gravação assistant anterior e o histórico final: recuperação e deduplicação continuam pendentes. Os testes executam as consultas reais em PostgreSQL descartável com referência fictícia ao filtro, sem executar o n8n completo.

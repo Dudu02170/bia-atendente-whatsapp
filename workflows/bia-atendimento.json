@@ -103,7 +103,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES (\n  (SELECT id FROM leads WHERE telefone = '{{ $json.numero }}'),\n  '{{ $json.numero }}',\n  'entrada',\n  '{{ $('Filtrar e Extrair Dados').first().json.mensagem }}'\n);\n\nINSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES (\n  (SELECT id FROM leads WHERE telefone = '{{ $json.numero }}'),\n  '{{ $json.numero }}',\n  'saida',\n  '{{ $json.textoResposta }}'\n);",
+        "query": "WITH lead AS (\n  SELECT id FROM leads WHERE telefone = '{{ $json.telefone.replace(/'/g, \"''\") }}'\n)\nINSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES\n  (\n    (SELECT id FROM lead),\n    '{{ $json.telefone.replace(/'/g, \"''\") }}',\n    'entrada',\n    '{{ $('Filtrar e Extrair Dados').first().json.mensagem.replace(/'/g, \"''\") }}'\n  ),\n  (\n    (SELECT id FROM lead),\n    '{{ $json.telefone.replace(/'/g, \"''\") }}',\n    'saida',\n    '{{ $json.mensagem.replace(/'/g, \"''\") }}'\n  );",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
