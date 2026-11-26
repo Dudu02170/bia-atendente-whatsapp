@@ -55,11 +55,19 @@ class BiaLatestMessageTest {
     "ID desconhecido mesmo texto|550000000001|qa-missing|Última QA com 'aspas'|false",
     "outro telefone|550000000002|qa-other|Outro telefone QA|true",
     "telefone sem histórico|550000000003|qa-latest|Última QA com 'aspas'|false",
+    "sem ID não assume entrada identificada|550000000001|<empty>|Última QA com 'aspas'|false",
+    "sem ID não assume outro telefone identificado|550000000002|<empty>|Outro telefone QA|false",
     "legado sem ID texto atual|550000000001|<empty>|Última QA com 'aspas'|true",
     "legado sem ID texto antigo|550000000001|<empty>|Primeira QA|false"
   }, delimiter='|', quoteCharacter='"')
   void onlyLatestUserMessagePasses(String scenario, String phone, String id, String message, boolean expected) throws Exception {
     if (id.equals("<empty>")) id = "";
+    if(scenario.equals("legado sem ID texto atual")) {
+      // This positive fallback fixture must actually represent a row without an external ID.
+      try(var statement=db.createStatement()) {
+        assertEquals(1,statement.executeUpdate("UPDATE mensagens_whatsapp SET message_id=NULL WHERE message_id='qa-latest'"));
+      }
+    }
     var input = Map.of("telefone", phone, "message_id_atual", id, "mensagem_atual", message,
       "remote_jid_atual", phone + "@s.whatsapp.net", "nome", "Cliente QA");
     try (var s = db.createStatement(); var rs = s.executeQuery(render("Verificar última mensagem", input))) {

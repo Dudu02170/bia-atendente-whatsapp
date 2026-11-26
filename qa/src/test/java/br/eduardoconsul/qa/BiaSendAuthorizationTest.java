@@ -48,7 +48,7 @@ class BiaSendAuthorizationTest {
   }
 
   @ParameterizedTest(name="antes do envio: {0}")
-  @CsvSource({"atual,true","pausado,false","nulo,false","excluido,false","nova,false","semHistorico,false","legadoAtual,true","legadoAntigo,false"})
+  @CsvSource({"atual,true","pausado,false","nulo,false","excluido,false","nova,false","semHistorico,false","legadoAtual,true","legadoAntigo,false","semIdIdentificado,false","legadoNovoAposResposta,true"})
   void autorizaSomenteEstadoAtualEPreservaPayloadSemGravar(String scenario,boolean expected) throws Exception {
     Map<String,String> filter=new HashMap<>(Map.of("numero",PHONE,"messageId",ID,"mensagem",MESSAGE));
     try(var s=db.createStatement()) {
@@ -60,6 +60,19 @@ class BiaSendAuthorizationTest {
         case "semHistorico" -> s.executeUpdate("DELETE FROM mensagens_whatsapp WHERE telefone='"+PHONE+"'");
         case "legadoAtual" -> { filter.put("messageId",""); save(PHONE,"",MESSAGE); }
         case "legadoAntigo" -> { filter.put("messageId",""); filter.put("mensagem","Texto antigo QA"); }
+        case "semIdIdentificado" -> filter.put("messageId",""); // Same text cannot replace a missing external identity.
+        case "legadoNovoAposResposta" -> {
+          filter.put("messageId",""); save(PHONE,"",MESSAGE);
+          int answered;
+          try(var rows=s.executeQuery("SELECT id FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' AND role='user' ORDER BY id DESC LIMIT 1")) {
+            assertTrue(rows.next()); answered=rows.getInt(1);
+          }
+          try(var writer=db.createStatement();var rows=writer.executeQuery(render("Salvar resposta Bot",
+              Map.of("numero",PHONE,"pushName","Cliente QA","textoResposta","Resposta da entrada sem ID anterior QA","mensagem_origem_id",answered),filter))) {
+            assertTrue(rows.next()); assertEquals(answered,rows.getInt("mensagem_origem_id")); assertFalse(rows.next());
+          }
+          save(PHONE,"",MESSAGE); // A distinct anonymous input with the same text remains eligible.
+        }
         default -> { }
       }
     }
