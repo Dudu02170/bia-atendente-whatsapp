@@ -120,6 +120,10 @@ class BiaWorkflowTest {
     assertEquals("n8n-nodes-base.if",gate.path("type").asText());
     JsonNode config=gate.path("parameters").path("conditions");
     assertEquals("and",config.path("combinator").asText(),"As duas condições devem ser exigidas");
+    assertEquals("strict",config.path("options").path("typeValidation").asText());
+    assertFalse(gate.path("parameters").path("looseTypeValidation").asBoolean());
+    assertSingleMainTarget(workflow.path("connections").path("Wait").path("main").path(0),"Verificar última mensagem","Relê estado depois da espera");
+    assertSingleMainTarget(workflow.path("connections").path("Verificar última mensagem").path("main").path(0),"If","Gate usa a leitura atual");
     JsonNode conditions=config.path("conditions");
     assertEquals(2,conditions.size(),"Bot ativo e última mensagem");
     Set<String> expressions=new HashSet<>();
@@ -130,7 +134,7 @@ class BiaWorkflowTest {
       assertTrue(condition.path("operator").path("singleValue").asBoolean());
     }
     assertEquals(Set.of(
-      "={{ $('Criar ou Atualizar Lead').first().json.bot_ativo }}",
+      "={{ $json.bot_ativo_atual }}",
       "={{ $json.eh_ultima_mensagem }}"
     ),expressions);
     JsonNode outputs=workflow.path("connections").path("If").path("main");

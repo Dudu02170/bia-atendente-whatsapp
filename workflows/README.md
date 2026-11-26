@@ -17,7 +17,7 @@
 | Receber | Webhook → Filtrar e Extrair Dados (só mensagens recebidas, ignora as enviadas pelo próprio número) |
 | Registrar | Criar ou Atualizar Lead → Salvar mensagem do cliente |
 | Agrupar | Wait (10 s) → Verificar última mensagem: seleciona a última entrada do telefone com role=user; entradas antigas não passam pela comparação. Não garante idempotência de eventos repetidos |
-| Checar humano | If: segue apenas se `bot_ativo` for verdadeiro para aquele lead |
+| Checar humano | Verificar última mensagem relê bot_ativo do lead após Wait; If exige bot_ativo_atual e última mensagem como booleanos true |
 | Contexto | Buscar últimas mensagens (8) → Montar contexto |
 | Entender | Detectar intenção → Base de produtos → Base de links oficiais → Switch |
 | Responder | Catálogo, detalhe de linha e lead de anúncio têm respostas prontas; o resto vai para Chamar IA (Claude) |
@@ -42,3 +42,8 @@ Salvar resposta Bot grava o registro assistant em mensagens_whatsapp e as linhas
 Se qualquer um dos três registros for rejeitado pelo banco, nenhum deles fica gravado por essa operação; a entrada user recebida anteriormente e os registros de outros telefones permanecem intactos. Os testes JDBC também repetem a operação SQL depois de uma falha confirmada/rollback, sem reenviar mensagem externa. Isso não implementa retry automático no workflow.
 
 A transação cobre somente a persistência posterior ao envio. Evolution/WhatsApp e a entrada user já gravada estão fora dela. Um envio bem-sucedido seguido de erro no banco ainda pode deixar a mensagem externa sem histórico local. Resultado incerto por perda de conexão não autoriza reprocessamento automático. Deduplicação por message_id, correlação de resposta/tentativa, reconciliação e política de recuperação continuam pendentes. A unicidade do ID de entrada não impede nova resposta ao mesmo evento. Não há execução real de n8n nos testes; o adaptador fornece referência fictícia ao filtro e PostgreSQL 16 é descartável.
+
+## Pausa do bot durante a espera
+Verificar última mensagem consulta o bot_ativo atual em leads_whatsapp para o telefone de entrada, depois da espera. If usa bot_ativo_atual, em vez da cópia retornada por Criar ou Atualizar Lead antes dos 10 segundos. Exige booleanos true para estado atual e última mensagem, com tipos estritos; lead ausente ou bot_ativo NULL resulta em false. Reativação confirmada antes da consulta também é observada. A leitura não modifica leads ou histórico.
+
+O estado é o observado pela consulta naquele momento: uma pausa posterior, durante contexto/IA/envio, ainda pode ocorrer depois dessa checagem. Não é trava sobre o atendimento nem cancela um envio já iniciado. Os testes executam as consultas reais em PostgreSQL descartável e inspecionam o gate exportado, sem executar Wait, IF ou runtime n8n, atendimento humano real ou WhatsApp. A próxima proteção desse fluxo é verificar novamente próximo ao envio; deduplicação/reconciliação continua pendente.

@@ -125,6 +125,51 @@ class BiaLatestMessageTest {
     }
   }
 
+  @ParameterizedTest(name="estado atual: antes={0}, depois={1}")
+  @CsvSource({"true,pausado,false", "false,ativo,true", "true,ativo,true", "true,nulo,false", "true,excluido,false"})
+  void gateRecebeEstadoAtualDoLeadEmVezDaCopiaAnterior(boolean before, String current, boolean expected) throws Exception {
+    String phone="550000000001", other="550000000002";
+    try(var s=db.createStatement()) {
+      s.executeUpdate("DELETE FROM leads_whatsapp WHERE telefone IN ('"+phone+"','"+other+"')");
+    }
+    try(var s=db.prepareStatement("INSERT INTO leads_whatsapp (telefone,nome,bot_ativo) VALUES (?,'Cliente QA',?),(?,'Outro QA',true)")) {
+      s.setString(1,phone); s.setBoolean(2,before); s.setString(3,other); s.executeUpdate();
+    }
+    Map<String,String> input=Map.of("numero",phone,"nome","Cliente QA","mensagem","Última QA com 'aspas'",
+      "remoteJid",phone+"@s.whatsapp.net","messageId","qa-latest","tipoMensagem","conversation");
+    Map<String,String> captured=new HashMap<>();
+    try(var s=db.createStatement();var rs=s.executeQuery(render("Criar ou Atualizar Lead",input))) {
+      assertTrue(rs.next()); assertEquals(before,rs.getBoolean("bot_ativo"),"Estado capturado antes da espera");
+      for(String key:List.of("telefone","nome","mensagem_atual","remote_jid_atual","message_id_atual","tipo_mensagem_atual"))
+        captured.put(key,rs.getString(key));
+      assertFalse(rs.next());
+    }
+    // Emulate an existing administrative database change between the actual lead query and the gate query.
+    // No sleep, n8n runtime or external messaging is involved.
+    try(var s=db.prepareStatement(current.equals("excluido")
+        ? "DELETE FROM leads_whatsapp WHERE telefone=?"
+        : "UPDATE leads_whatsapp SET bot_ativo="+(current.equals("nulo")?"NULL":current.equals("ativo")?"true":"false")+" WHERE telefone=?")) {
+      s.setString(1,phone); assertEquals(1,s.executeUpdate());
+    }
+    String leadsBefore=snapshot("leads_whatsapp"), messagesBefore=snapshot("mensagens_whatsapp");
+    try(var s=db.createStatement();var rs=s.executeQuery(render("Verificar última mensagem",captured))) {
+      assertTrue(rs.next());
+      assertEquals(expected,rs.getObject("bot_ativo_atual"),"Booleano atual, sem usar o estado capturado");
+      assertEquals(Boolean.TRUE,rs.getObject("eh_ultima_mensagem"),"A comparação da última mensagem é preservada");
+      assertEquals(phone,rs.getString("numero")); assertEquals("qa-latest",rs.getString("message_id_atual"));
+      assertEquals("Última QA com 'aspas'",rs.getString("mensagem_atual"));
+      assertEquals(phone+"@s.whatsapp.net",rs.getString("remoteJid")); assertFalse(rs.next());
+    }
+    assertEquals(leadsBefore,snapshot("leads_whatsapp"),"Consulta não modifica leads, inclusive o outro telefone");
+    assertEquals(messagesBefore,snapshot("mensagens_whatsapp"),"Histórico completo permanece intacto");
+  }
+
+  private static String snapshot(String table) throws Exception {
+    try(var s=db.createStatement();var rs=s.executeQuery("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb)::text FROM "+table+" t")) {
+      assertTrue(rs.next()); return rs.getString(1);
+    }
+  }
+
   // JDBC consumes the INSERT count then the actual SELECT result from the exported writer.
   private static Map<String,String> output(String node, Map<String,String> input) throws Exception {
     try (var s = db.createStatement()) {

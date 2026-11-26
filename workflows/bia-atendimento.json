@@ -35,14 +35,14 @@
           "options": {
             "caseSensitive": true,
             "leftValue": "",
-            "typeValidation": "loose",
+            "typeValidation": "strict",
             "version": 3
           },
           "conditions": [
             {
               "id": "4c309c49-cbc8-4625-a2cb-fc232ffa098f",
-              "leftValue": "={{ $('Criar ou Atualizar Lead').first().json.bot_ativo }}",
-              "rightValue": "true",
+              "leftValue": "={{ $json.bot_ativo_atual }}",
+              "rightValue": "",
               "operator": {
                 "type": "boolean",
                 "operation": "true",
@@ -62,7 +62,7 @@
           ],
           "combinator": "and"
         },
-        "looseTypeValidation": true,
+        "looseTypeValidation": false,
         "options": {}
       },
       "type": "n8n-nodes-base.if",
@@ -406,7 +406,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "WITH entrada AS (\n  SELECT\n    '{{ ($json.telefone || $json.numero || \"\").replace(/\\D/g, \"\") }}'::text AS telefone,\n    '{{ ($json.message_id || $json.messageId || $json.message_id_atual || \"\").replace(/'/g, \"''\") }}'::text AS message_id,\n    '{{ ($json.mensagem_atual || $json.mensagem || \"\").replace(/'/g, \"''\") }}'::text AS mensagem\n),\n\nultima AS (\n  SELECT\n    id,\n    telefone,\n    message_id,\n    mensagem\n  FROM mensagens_whatsapp\n  WHERE telefone = (SELECT telefone FROM entrada)\n    AND role = 'user'\n  ORDER BY id DESC\n  LIMIT 1\n)\n\nSELECT\n  entrada.telefone,\n  entrada.telefone AS numero,\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS \"remoteJid\",\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS remote_jid_atual,\n  '{{ ($json.pushName || $json.push_name || $json.nome || \"Cliente\").replace(/'/g, \"''\") }}'::text AS \"pushName\",\n  entrada.mensagem AS mensagem,\n  entrada.mensagem AS mensagem_atual,\n  entrada.message_id AS message_id_atual,\n\n  CASE\n    WHEN entrada.message_id <> ''\n      AND ultima.message_id = entrada.message_id\n    THEN true\n\n    WHEN entrada.message_id = ''\n      AND ultima.mensagem = entrada.mensagem\n    THEN true\n\n    ELSE false\n  END AS eh_ultima_mensagem\n\nFROM entrada\nLEFT JOIN ultima ON true;",
+        "query": "WITH entrada AS (\n  SELECT\n    '{{ ($json.telefone || $json.numero || \"\").replace(/\\D/g, \"\") }}'::text AS telefone,\n    '{{ ($json.message_id || $json.messageId || $json.message_id_atual || \"\").replace(/'/g, \"''\") }}'::text AS message_id,\n    '{{ ($json.mensagem_atual || $json.mensagem || \"\").replace(/'/g, \"''\") }}'::text AS mensagem\n),\n\nultima AS (\n  SELECT\n    id,\n    telefone,\n    message_id,\n    mensagem\n  FROM mensagens_whatsapp\n  WHERE telefone = (SELECT telefone FROM entrada)\n    AND role = 'user'\n  ORDER BY id DESC\n  LIMIT 1\n)\n\nSELECT\n  entrada.telefone,\n  entrada.telefone AS numero,\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS \"remoteJid\",\n  '{{ ($json.remoteJid || $json.remote_jid_atual || \"\").replace(/'/g, \"''\") }}'::text AS remote_jid_atual,\n  '{{ ($json.pushName || $json.push_name || $json.nome || \"Cliente\").replace(/'/g, \"''\") }}'::text AS \"pushName\",\n  entrada.mensagem AS mensagem,\n  entrada.mensagem AS mensagem_atual,\n  entrada.message_id AS message_id_atual,\n  COALESCE((\n    SELECT bot_ativo FROM leads_whatsapp\n    WHERE telefone = entrada.telefone\n  ), false) AS bot_ativo_atual,\n\n  CASE\n    WHEN entrada.message_id <> ''\n      AND ultima.message_id = entrada.message_id\n    THEN true\n\n    WHEN entrada.message_id = ''\n      AND ultima.mensagem = entrada.mensagem\n    THEN true\n\n    ELSE false\n  END AS eh_ultima_mensagem\n\nFROM entrada\nLEFT JOIN ultima ON true;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
