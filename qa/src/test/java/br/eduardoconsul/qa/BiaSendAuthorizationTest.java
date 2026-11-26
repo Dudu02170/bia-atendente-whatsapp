@@ -35,6 +35,7 @@ class BiaSendAuthorizationTest {
   }
   @BeforeEach void prepare() throws Exception {
     try(var s=db.createStatement()) { s.execute("TRUNCATE leads_whatsapp,mensagens_whatsapp RESTART IDENTITY"); }
+    receive(PHONE,"qa-older","Entrada mais antiga QA");
     captured=receive(PHONE,ID,MESSAGE);
     receive("550000000002","qa-other","Outro telefone QA");
     try(var s=db.createStatement()) {
@@ -101,7 +102,60 @@ class BiaSendAuthorizationTest {
         assertTrue(rs.next()); assertEquals(expectedOrigin,rs.getObject("mensagem_origem_id"));
         assertEquals("assistant",rs.getString("role")); assertFalse(rs.next());
       }
+      // A sequential replay after the confirmed response is persisted must not send again.
+      String recordedMessages=snapshot("mensagens_whatsapp"),history=snapshot("mensagens");
+      try(var statement=db.createStatement();var replay=statement.executeQuery(render("Autorizar envio atual",payload,filter))) {
+        assertFalse(replay.next(),"Resposta já vinculada impede nova autorização da mesma entrada");
+      }
+      JsonNode replaySender=runSender(Map.of());
+      assertFalse(replaySender.has("error")); assertEquals(0,replaySender.path("calls").size());
+      assertEquals(0,replaySender.path("result").size());
+      assertEquals(recordedMessages,snapshot("mensagens_whatsapp")); assertEquals(history,snapshot("mensagens"));
+      assertEquals(leads,snapshot("leads_whatsapp"));
     }
+  }
+
+  @ParameterizedTest(name="resposta prévia: {0}")
+  @CsvSource({"mesmaOrigem,false","outraOrigem,true","semVinculo,true","outroPapel,true","outroTelefone,true"})
+  void bloqueiaSomenteRespostaAssistantVinculadaAoMesmoTelefone(String scenario,boolean expected) throws Exception {
+    int current,older;
+    try(var statement=db.createStatement();var rows=statement.executeQuery(
+        "SELECT id,message_id FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' AND role='user' ORDER BY id")) {
+      assertTrue(rows.next()); older=rows.getInt("id"); assertEquals("qa-older",rows.getString("message_id"));
+      assertTrue(rows.next()); current=rows.getInt("id"); assertEquals(ID,rows.getString("message_id")); assertFalse(rows.next());
+    }
+    Map<String,String> filter=Map.of("numero",PHONE,"messageId",ID,"mensagem",MESSAGE);
+    if(scenario.equals("outroPapel")) {
+      // Keep this user row older than the current entry, so only role controls the result.
+      try(var statement=db.createStatement()) { statement.executeUpdate(
+        "UPDATE mensagens_whatsapp SET mensagem_origem_id="+current+" WHERE id="+older); }
+    } else if(scenario.equals("outroTelefone")) {
+      // Deliberately inconsistent legacy fixture; the production writer rejects this association.
+      try(var statement=db.createStatement()) { statement.executeUpdate(
+        "INSERT INTO mensagens_whatsapp(telefone,role,mensagem,mensagem_origem_id) VALUES ('550000000002','assistant','Outro telefone QA',"+current+")"); }
+    } else {
+      Map<String,Object> response=new HashMap<>(Map.of("numero",PHONE,"pushName","Cliente QA","textoResposta","Resposta registrada QA"));
+      if(!scenario.equals("semVinculo")) response.put("mensagem_origem_id",scenario.equals("outraOrigem")?older:current);
+      try(var statement=db.createStatement();var rows=statement.executeQuery(render("Salvar resposta Bot",response,filter))) {
+        assertTrue(rows.next());
+        assertEquals(scenario.equals("semVinculo")?null:scenario.equals("outraOrigem")?older:current,rows.getObject("mensagem_origem_id"));
+        assertFalse(rows.next());
+      }
+    }
+    String leads=snapshot("leads_whatsapp"),messages=snapshot("mensagens_whatsapp"),history=snapshot("mensagens");
+    Map<String,Object> authorization=new HashMap<>();
+    try(var statement=db.createStatement();var rows=statement.executeQuery(render("Autorizar envio atual",Map.of("textoResposta","Nova resposta QA"),filter))) {
+      assertEquals(expected,rows.next());
+      if(expected) {
+        assertEquals(Boolean.TRUE,rows.getObject("autorizado"));
+        JsonNode data=JSON.readTree(rows.getString("dados_envio"));
+        assertEquals(current,data.path("mensagem_origem_id").asInt()); assertEquals(PHONE,data.path("numero").asText());
+        authorization.put("autorizado",rows.getObject("autorizado")); authorization.put("dados_envio",data); assertFalse(rows.next());
+      }
+    }
+    JsonNode sent=runSender(authorization);
+    assertFalse(sent.has("error")); assertEquals(expected?1:0,sent.path("calls").size()); assertEquals(expected?1:0,sent.path("result").size());
+    assertEquals(leads,snapshot("leads_whatsapp")); assertEquals(messages,snapshot("mensagens_whatsapp")); assertEquals(history,snapshot("mensagens"));
   }
 
   private static Map<String,String> receive(String phone,String id,String message) throws Exception {
