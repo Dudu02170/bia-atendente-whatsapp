@@ -84,7 +84,13 @@ class BiaWorkflowTest {
       for(JsonNode outputs:edge.getValue()) for(JsonNode branch:outputs) for(JsonNode target:branch)
         if("Enviar mensagem".equals(target.path("node").asText())) incoming.add(edge.getKey());
     });
-    assertEquals(List.of("Validador final"),incoming);
+    assertEquals(List.of("Autorizar envio atual"),incoming);
+    assertSingleMainTarget(workflow.path("connections").path("Validador final").path("main").path(0),"Autorizar envio atual","Validação antes da autorização");
+    JsonNode authorization=nodes.get("Autorizar envio atual");
+    assertEquals("n8n-nodes-base.postgres",authorization.path("type").asText());
+    assertFalse(authorization.path("alwaysOutputData").asBoolean());
+    assertFalse(authorization.path("continueOnFail").asBoolean());
+    assertFalse(authorization.path("retryOnFail").asBoolean());
   }
 
   @Test void intencoesUsamSaidasCorretasEFallbackConsultivo() {
@@ -146,7 +152,7 @@ class BiaWorkflowTest {
 
   @Test void nenhumCaminhoDeEnvioContornaFiltrosObrigatorios() {
     assertTrue(reachesSendWithout(null),"Pré-condição: envio deve ser alcançável");
-    for(String required:List.of("Filtrar e Extrair Dados","If","Validador final")) {
+    for(String required:List.of("Filtrar e Extrair Dados","If","Validador final","Autorizar envio atual")) {
       JsonNode node=nodes.get(required);
       assertNotNull(node,"Controle obrigatório ausente: "+required);
       assertFalse(node.path("disabled").asBoolean(false),"Controle desativado: "+required);

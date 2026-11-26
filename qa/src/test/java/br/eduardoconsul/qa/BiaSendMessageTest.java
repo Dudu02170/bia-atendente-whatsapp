@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.Map;
@@ -77,6 +78,25 @@ class BiaSendMessageTest {
   }
 
   private static JsonNode run(Map<String,String> input, Map<String,?> http) throws Exception {
+    return runEnvelope(Map.of("autorizado",true,"dados_envio",input),http);
+  }
+
+  @ParameterizedTest(name="autorização inválida: {0}")
+  @ValueSource(strings={"false","string","missingPayload","array","flat"})
+  void ausenciaDeAutorizacaoEstritaNaoTentaHttp(String scenario) throws Exception {
+    var data=Map.of("numero","550000000001","textoResposta","Resposta QA");
+    Map<String,?> input=switch(scenario) {
+      case "false" -> Map.of("autorizado",false,"dados_envio",data);
+      case "string" -> Map.of("autorizado","true","dados_envio",data);
+      case "missingPayload" -> Map.of("autorizado",true);
+      case "array" -> Map.of("autorizado",true,"dados_envio",java.util.List.of(data));
+      default -> data;
+    };
+    JsonNode out=runEnvelope(input,Map.of());
+    assertFalse(out.has("error")); assertEquals(0,out.path("result").size()); assertEquals(0,out.path("calls").size());
+  }
+
+  private static JsonNode runEnvelope(Map<String,?> input, Map<String,?> http) throws Exception {
     Process process = new ProcessBuilder("node", "support/send-message.cjs").redirectErrorStream(true).start();
     try {
       try (var stdin = process.getOutputStream()) { stdin.write(JSON.writeValueAsBytes(Map.of("code", code, "input", input, "http", http))); }

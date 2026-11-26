@@ -1,6 +1,6 @@
 # Fluxo do n8n
 
-`bia-atendimento.json` é o fluxo completo da Bia, com 22 nós.
+`bia-atendimento.json` é o fluxo completo da Bia, com 23 nós.
 
 ## Como importar
 
@@ -21,7 +21,7 @@
 | Contexto | Buscar últimas mensagens (8) → Montar contexto |
 | Entender | Detectar intenção → Base de produtos → Base de links oficiais → Switch |
 | Responder | Catálogo, detalhe de linha e lead de anúncio têm respostas prontas; o resto vai para Chamar IA (Claude) |
-| Revisar | Limpar resposta final → Validador final (remove Markdown, links inventados e promessas que a empresa não pode cumprir) |
+| Revisar | Limpar resposta final → Validador final (remove Markdown, links inventados e promessas que a empresa não pode cumprir) → Autorizar envio atual (relê pausa/última entrada) |
 | Enviar | Enviar mensagem (Evolution API) → Envio confirmado → Salvar resposta Bot (resposta + histórico em uma instrução SQL) |
 
 ## Validação da entrada
@@ -47,3 +47,10 @@ A transação cobre somente a persistência posterior ao envio. Evolution/WhatsA
 Verificar última mensagem consulta o bot_ativo atual em leads_whatsapp para o telefone de entrada, depois da espera. If usa bot_ativo_atual, em vez da cópia retornada por Criar ou Atualizar Lead antes dos 10 segundos. Exige booleanos true para estado atual e última mensagem, com tipos estritos; lead ausente ou bot_ativo NULL resulta em false. Reativação confirmada antes da consulta também é observada. A leitura não modifica leads ou histórico.
 
 O estado é o observado pela consulta naquele momento: uma pausa posterior, durante contexto/IA/envio, ainda pode ocorrer depois dessa checagem. Não é trava sobre o atendimento nem cancela um envio já iniciado. Os testes executam as consultas reais em PostgreSQL descartável e inspecionam o gate exportado, sem executar Wait, IF ou runtime n8n, atendimento humano real ou WhatsApp. A próxima proteção desse fluxo é verificar novamente próximo ao envio; deduplicação/reconciliação continua pendente.
+
+## Reautorização próxima ao envio
+Após Validador final e antes de Enviar mensagem, Autorizar envio atual relê o lead e a última entrada role=user do telefone original do filtro. Só devolve uma linha com autorizado=true e dados_envio quando o bot está ativo e o ID ainda é o mais recente. Sem ID mantém o fallback por texto; não é deduplicação. Lead ausente/NULL/pausado, entrada substituída ou histórico ausente produz zero linhas. O nó não emite dados vazios nem continua em falha; configure sua credencial Postgres como nos demais nós SQL ao importar.
+
+O JSON da resposta é preservado, inclusive metadados, e numero é definido pelo telefone canônico da entrada. Enviar mensagem exige autorizado booleano true e dados_envio objeto; itens planos, strings true ou payload ausente/array não tentam HTTP. O retorno do remetente continua plano para o gate de confirmação e persistência existentes. Não há envio ou gravação na consulta de autorização.
+
+A leitura reduz a janela durante contexto/IA, mas não torna a checagem e a chamada HTTP atômicas: mudança posterior ao SELECT ou envio já iniciado ainda não é cancelado. Não bloqueia execuções duplicadas do mesmo ID, nem reconcilia resultado incerto. Testes JDBC usam PostgreSQL descartável e passam sua linha real ao código do remetente com HTTP simulado; não executam runtime/item linking n8n ou Evolution/WhatsApp reais.

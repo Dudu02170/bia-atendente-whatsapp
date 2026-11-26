@@ -102,7 +102,7 @@
     },
     {
       "parameters": {
-        "jsCode": "if (!$json.textoResposta) {\n  return [];\n}\n\nconst numeroRaw =\n  $json.numero ||\n  $json.telefone ||\n  $json.cliente?.telefone ||\n  $json.remoteJid ||\n  $json.remote_jid_atual ||\n  '';\n\nlet numero = String(numeroRaw)\n  .replace('@s.whatsapp.net', '')\n  .replace('@lid', '')\n  .replace(/\\D/g, '');\n\nlet textoResposta = String($json.textoResposta || '')\n  // Remove caracteres invisíveis\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n\n  // Remove Markdown/negrito/itálico\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n\n  // Remove qualquer asterisco restante\n  .replace(/\\*/g, '')\n\n  // Remove espaços duplicados, mas mantém quebras de linha\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n\n  // Mantém parágrafos\n  .replace(/\\n{3,}/g, '\\n\\n')\n\n  .trim();\n\nif (!numero) {\n  throw new Error(\n    'Número não encontrado para envio. Campos recebidos: ' +\n    JSON.stringify(Object.keys($json))\n  );\n}\n\nif (!textoResposta) {\n  throw new Error('Texto da resposta vazio');\n}\n\nconst bodyEnvio = {\n  number: numero,\n  text: textoResposta\n};\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `http://evolution:8080/message/sendText/${$env.EVOLUTION_INSTANCE_NAME}`,\n    headers: {\n      apikey: $env.EVOLUTION_API_KEY,\n      'Content-Type': 'application/json'\n    },\n    body: bodyEnvio,\n    json: true\n  });\n\n  return [\n    {\n      json: {\n        ...$json,\n        numero,\n        remoteJid: $json.remoteJid || $json.remote_jid_atual || '',\n        mensagem: $json.mensagem || $json.mensagem_atual || '',\n        pushName: $json.pushName || $json.cliente?.nome || '',\n        textoResposta,\n        enviado: true,\n        bodyEnviado: bodyEnvio,\n        response\n      }\n    }\n  ];\n} catch (error) {\n  return [\n    {\n      json: {\n        ...$json,\n        enviado: false,\n        numero,\n        textoResposta,\n        bodyEnviado: bodyEnvio,\n        erroMensagem: error.message,\n        erroStatus: error.statusCode || error.response?.statusCode,\n        erroBody: error.response?.body || error.error || error.cause || error\n      }\n    }\n  ];\n}"
+        "jsCode": "if ($json.autorizado !== true || !$json.dados_envio ||\n    typeof $json.dados_envio !== 'object' || Array.isArray($json.dados_envio)) {\n  return [];\n}\nconst entrada = $json.dados_envio;\n\nif (!entrada.textoResposta) {\n  return [];\n}\n\nconst numeroRaw =\n  entrada.numero ||\n  entrada.telefone ||\n  entrada.cliente?.telefone ||\n  entrada.remoteJid ||\n  entrada.remote_jid_atual ||\n  '';\n\nlet numero = String(numeroRaw)\n  .replace('@s.whatsapp.net', '')\n  .replace('@lid', '')\n  .replace(/\\D/g, '');\n\nlet textoResposta = String(entrada.textoResposta || '')\n  // Remove caracteres invisíveis\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n\n  // Remove Markdown/negrito/itálico\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n\n  // Remove qualquer asterisco restante\n  .replace(/\\*/g, '')\n\n  // Remove espaços duplicados, mas mantém quebras de linha\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n\n  // Mantém parágrafos\n  .replace(/\\n{3,}/g, '\\n\\n')\n\n  .trim();\n\nif (!numero) {\n  throw new Error(\n    'Número não encontrado para envio. Campos recebidos: ' +\n    JSON.stringify(Object.keys(entrada))\n  );\n}\n\nif (!textoResposta) {\n  throw new Error('Texto da resposta vazio');\n}\n\nconst bodyEnvio = {\n  number: numero,\n  text: textoResposta\n};\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `http://evolution:8080/message/sendText/${$env.EVOLUTION_INSTANCE_NAME}`,\n    headers: {\n      apikey: $env.EVOLUTION_API_KEY,\n      'Content-Type': 'application/json'\n    },\n    body: bodyEnvio,\n    json: true\n  });\n\n  return [\n    {\n      json: {\n        ...entrada,\n        numero,\n        remoteJid: entrada.remoteJid || entrada.remote_jid_atual || '',\n        mensagem: entrada.mensagem || entrada.mensagem_atual || '',\n        pushName: entrada.pushName || entrada.cliente?.nome || '',\n        textoResposta,\n        enviado: true,\n        bodyEnviado: bodyEnvio,\n        response\n      }\n    }\n  ];\n} catch (error) {\n  return [\n    {\n      json: {\n        ...entrada,\n        enviado: false,\n        numero,\n        textoResposta,\n        bodyEnviado: bodyEnvio,\n        erroMensagem: error.message,\n        erroStatus: error.statusCode || error.response?.statusCode,\n        erroBody: error.response?.body || error.error || error.cause || error\n      }\n    }\n  ];\n}"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -457,6 +457,29 @@
       ],
       "id": "68a93378-28aa-47af-866e-c8ec57a92445",
       "name": "Envio confirmado"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH entrada AS (\n  SELECT\n    '{{ $('Filtrar e Extrair Dados').first().json.numero.replace(/\\D/g, \"\") }}'::text AS telefone,\n    '{{ ($('Filtrar e Extrair Dados').first().json.messageId || \"\").replace(/'/g, \"''\") }}'::text AS message_id,\n    '{{ $('Filtrar e Extrair Dados').first().json.mensagem.replace(/'/g, \"''\") }}'::text AS mensagem,\n    '{{ JSON.stringify($json).replace(/'/g, \"''\") }}'::jsonb AS dados\n),\nultima AS (\n  SELECT message_id, mensagem\n  FROM mensagens_whatsapp\n  WHERE telefone = (SELECT telefone FROM entrada) AND role = 'user'\n  ORDER BY id DESC\n  LIMIT 1\n)\nSELECT\n  true AS autorizado,\n  entrada.dados || jsonb_build_object('numero', entrada.telefone) AS dados_envio\nFROM entrada\nJOIN leads_whatsapp AS lead ON lead.telefone = entrada.telefone\nCROSS JOIN ultima\nWHERE lead.bot_ativo IS TRUE\n  AND (\n    (entrada.message_id <> '' AND ultima.message_id = entrada.message_id)\n    OR (entrada.message_id = '' AND ultima.mensagem = entrada.mensagem)\n  );",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2944,
+        160
+      ],
+      "id": "739c1a61-2b88-43f9-a8c1-3c21b85726a9",
+      "name": "Autorizar envio atual",
+      "credentials": {
+        "postgres": {
+          "name": "Postgres Bia"
+        }
+      },
+      "alwaysOutputData": false,
+      "continueOnFail": false,
+      "retryOnFail": false
     }
   ],
   "connections": {
@@ -655,7 +678,7 @@
       "main": [
         [
           {
-            "node": "Enviar mensagem",
+            "node": "Autorizar envio atual",
             "type": "main",
             "index": 0
           }
@@ -716,6 +739,17 @@
           }
         ],
         []
+      ]
+    },
+    "Autorizar envio atual": {
+      "main": [
+        [
+          {
+            "node": "Enviar mensagem",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
