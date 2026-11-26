@@ -150,3 +150,13 @@ ALTER TABLE ONLY public.mensagens
     ADD CONSTRAINT mensagens_lead_id_fkey FOREIGN KEY (lead_id) REFERENCES public.leads(id);
 
 
+
+-- Correlação opcional de uma resposta com a entrada que a originou.
+ALTER TABLE public.mensagens_whatsapp
+    ADD COLUMN mensagem_origem_id integer;
+ALTER TABLE public.mensagens_whatsapp
+    ADD CONSTRAINT mensagens_whatsapp_mensagem_origem_fkey
+    FOREIGN KEY (mensagem_origem_id) REFERENCES public.mensagens_whatsapp(id)
+    ON DELETE SET NULL;
+CREATE INDEX idx_mensagens_whatsapp_origem
+    ON public.mensagens_whatsapp(mensagem_origem_id);

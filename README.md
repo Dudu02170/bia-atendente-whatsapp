@@ -82,3 +82,6 @@ cloudflared tunnel --url http://localhost:5678
 ## Autor
 
 **Eduardo Consul** · [LinkedIn](https://www.linkedin.com/in/eduardo-consul-32ab59260/) · [GitHub](https://github.com/Dudu02170)
+
+### Atualização de banco existente para correlação de respostas
+O workflow versionado usa a coluna opcional `mensagem_origem_id` para relacionar a resposta à entrada recebida. Banco novo recebe o schema completo em `sql/01-schema.sql`. Para banco existente no schema anterior do repositório, revise e valide em cópia isolada a migração `sql/migrations/002-resposta-origem.sql` antes de importar o workflow atualizado; ela não recria tabelas nem infere vínculos antigos. Não é necessário apagar/recriar o volume. Nenhuma migração de produção foi executada nesta entrega. Detalhes e limites em `workflows/README.md` e `qa/KNOWN_ISSUES.md`.

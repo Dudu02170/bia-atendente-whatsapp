@@ -6,9 +6,10 @@
 
 1. Abra o n8n em http://localhost:5678.
 2. Vá em **Workflows → Import from File** e escolha `bia-atendimento.json`.
-3. Crie uma credencial **Postgres** apontando para o banco do `docker-compose` (host `postgres`) e selecione-a nos nós de banco.
-4. A chave da Anthropic e a da Evolution API são lidas do `.env` pelas variáveis `ANTHROPIC_API_KEY`, `EVOLUTION_API_KEY` e `EVOLUTION_INSTANCE_NAME`. Nada fica escrito no fluxo.
-5. Troque os produtos de exemplo (`PROD-A`, `PROD-B`, `PROD-PRO`) nos nós **Base de produtos** e **Base de links oficiais** pelos produtos do seu negócio.
+3. Em banco já existente, aplique a migração revisada `sql/migrations/002-resposta-origem.sql` antes de importar o workflow atualizado; valide primeiro numa cópia isolada. Banco novo recebe a coluna no inicializador `sql/01-schema.sql`. Não recrie o volume existente.
+4. Crie uma credencial **Postgres** apontando para o banco do `docker-compose` (host `postgres`) e selecione-a nos nós de banco.
+5. A chave da Anthropic e a da Evolution API são lidas do `.env` pelas variáveis `ANTHROPIC_API_KEY`, `EVOLUTION_API_KEY` e `EVOLUTION_INSTANCE_NAME`. Nada fica escrito no fluxo.
+6. Troque os produtos de exemplo (`PROD-A`, `PROD-B`, `PROD-PRO`) nos nós **Base de produtos** e **Base de links oficiais** pelos produtos do seu negócio.
 
 ## Etapas do fluxo
 
@@ -54,3 +55,10 @@ Após Validador final e antes de Enviar mensagem, Autorizar envio atual relê o 
 O JSON da resposta é preservado, inclusive metadados, e numero é definido pelo telefone canônico da entrada. Enviar mensagem exige autorizado booleano true e dados_envio objeto; itens planos, strings true ou payload ausente/array não tentam HTTP. O retorno do remetente continua plano para o gate de confirmação e persistência existentes. Não há envio ou gravação na consulta de autorização.
 
 A leitura reduz a janela durante contexto/IA, mas não torna a checagem e a chamada HTTP atômicas: mudança posterior ao SELECT ou envio já iniciado ainda não é cancelado. Não bloqueia execuções duplicadas do mesmo ID, nem reconcilia resultado incerto. Testes JDBC usam PostgreSQL descartável e passam sua linha real ao código do remetente com HTTP simulado; não executam runtime/item linking n8n ou Evolution/WhatsApp reais.
+
+## Correlação da resposta com a entrada
+Autorizar envio atual também inclui mensagem_origem_id com o ID interno da última entrada user autorizada. Esse valor, obtido no banco, substitui qualquer sugestão desse campo no payload e acompanha a resposta pelo remetente até Salvar resposta Bot. A gravação associa somente entrada user do mesmo telefone; metadado ausente/inválido, ID inexistente, outro telefone ou role assistant deixam o vínculo NULL por compatibilidade. O fluxo normal transporta o ID numérico produzido pela consulta. Não usa o message_id externo da resposta nem tenta inferir vínculos históricos.
+
+A coluna opcional mensagem_origem_id tem FK para mensagens_whatsapp(id) e índice de consulta não exclusivo. Registros antigos permanecem NULL. Excluir a entrada deixa o vínculo NULL, preservando a resposta e o histórico final. Isso permite localizar a entrada de uma resposta confirmada sem misturar conversas; não registra uma tentativa antes do HTTP, não impede respostas duplicadas e não reconcilia envio sem resultado local.
+
+Para bancos existentes a migração é explícita, transacional e repetível no schema anterior conhecido; os testes emulam esse schema removendo somente a nova coluna de um banco descartável, mantêm registros legados e aplicam o arquivo duas vezes. Nenhuma migração foi aplicada em produção. Consultas/configurações personalizadas ou outras versões de schema exigem revisão própria antes de uso.

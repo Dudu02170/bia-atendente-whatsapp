@@ -64,15 +64,19 @@ class BiaSendAuthorizationTest {
     }
     var payload=Map.of("numero","550000000099","textoResposta","Resposta D'Ávila QA\nCaminho \\QA",
       "mensagem",MESSAGE,"message_id_atual",ID,"remoteJid",PHONE+"@s.whatsapp.net",
-      "extraQA",Map.of("lista",List.of("aspas 'QA'",2,true)));
+      "extraQA",Map.of("lista",List.of("aspas 'QA'",2,true)),"mensagem_origem_id",999999);
     String leads=snapshot("leads_whatsapp"),messages=snapshot("mensagens_whatsapp");
+    Integer expectedOrigin=null;
+    try(var s=db.createStatement();var rs=s.executeQuery("SELECT id FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' AND role='user' ORDER BY id DESC LIMIT 1")) {
+      if(rs.next()) expectedOrigin=rs.getInt(1);
+    }
     Map<String,Object> authorization=new HashMap<>();
     try(var s=db.createStatement();var rs=s.executeQuery(render("Autorizar envio atual",payload,filter))) {
       assertEquals(expected,rs.next(),"Somente entrada autorizada produz um item para envio");
       if(expected) {
         assertEquals(Boolean.TRUE,rs.getObject("autorizado"));
         JsonNode data=JSON.readTree(rs.getString("dados_envio"));
-        var expectedPayload=JSON.valueToTree(payload); ((com.fasterxml.jackson.databind.node.ObjectNode)expectedPayload).put("numero",PHONE);
+        var expectedPayload=JSON.valueToTree(payload); ((com.fasterxml.jackson.databind.node.ObjectNode)expectedPayload).put("numero",PHONE).put("mensagem_origem_id",expectedOrigin);
         assertEquals(expectedPayload,data,"JSON preservado; destinatário vem da entrada canônica, não do payload de resposta");
         authorization.put("autorizado",rs.getObject("autorizado")); authorization.put("dados_envio",data);
         assertFalse(rs.next());
@@ -90,6 +94,14 @@ class BiaSendAuthorizationTest {
       assertTrue(sent.path("result").get(0).path("json").path("enviado").asBoolean());
     }
     assertEquals(leads,snapshot("leads_whatsapp")); assertEquals(messages,snapshot("mensagens_whatsapp"));
+    if(expected) {
+      Map<String,Object> sentRow=JSON.convertValue(sent.path("result").get(0).path("json"),
+        new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>() {});
+      try(var s=db.createStatement();var rs=s.executeQuery(render("Salvar resposta Bot",sentRow,filter))) {
+        assertTrue(rs.next()); assertEquals(expectedOrigin,rs.getObject("mensagem_origem_id"));
+        assertEquals("assistant",rs.getString("role")); assertFalse(rs.next());
+      }
+    }
   }
 
   private static Map<String,String> receive(String phone,String id,String message) throws Exception {
