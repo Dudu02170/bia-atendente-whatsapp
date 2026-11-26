@@ -102,26 +102,6 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "WITH lead AS (\n  SELECT id FROM leads WHERE telefone = '{{ $json.telefone.replace(/'/g, \"''\") }}'\n)\nINSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\nVALUES\n  (\n    (SELECT id FROM lead),\n    '{{ $json.telefone.replace(/'/g, \"''\") }}',\n    'entrada',\n    '{{ $('Filtrar e Extrair Dados').first().json.mensagem.replace(/'/g, \"''\") }}'\n  ),\n  (\n    (SELECT id FROM lead),\n    '{{ $json.telefone.replace(/'/g, \"''\") }}',\n    'saida',\n    '{{ $json.mensagem.replace(/'/g, \"''\") }}'\n  );",
-        "options": {}
-      },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
-      "position": [
-        3456,
-        -96
-      ],
-      "id": "f52ba9a1-5ea3-4f27-8c68-062353a486e0",
-      "name": "Salvar mensagem",
-      "credentials": {
-        "postgres": {
-          "name": "Postgres Bia"
-        }
-      }
-    },
-    {
-      "parameters": {
         "jsCode": "if (!$json.textoResposta) {\n  return [];\n}\n\nconst numeroRaw =\n  $json.numero ||\n  $json.telefone ||\n  $json.cliente?.telefone ||\n  $json.remoteJid ||\n  $json.remote_jid_atual ||\n  '';\n\nlet numero = String(numeroRaw)\n  .replace('@s.whatsapp.net', '')\n  .replace('@lid', '')\n  .replace(/\\D/g, '');\n\nlet textoResposta = String($json.textoResposta || '')\n  // Remove caracteres invisíveis\n  .replace(/[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]/g, '')\n\n  // Remove Markdown/negrito/itálico\n  .replace(/\\*\\*(.*?)\\*\\*/g, '$1')\n  .replace(/\\*(.*?)\\*/g, '$1')\n  .replace(/__(.*?)__/g, '$1')\n  .replace(/_(.*?)_/g, '$1')\n  .replace(/`([^`]+)`/g, '$1')\n\n  // Remove qualquer asterisco restante\n  .replace(/\\*/g, '')\n\n  // Remove espaços duplicados, mas mantém quebras de linha\n  .replace(/[ \\t]{2,}/g, ' ')\n  .replace(/[ \\t]+([,.!?])/g, '$1')\n\n  // Mantém parágrafos\n  .replace(/\\n{3,}/g, '\\n\\n')\n\n  .trim();\n\nif (!numero) {\n  throw new Error(\n    'Número não encontrado para envio. Campos recebidos: ' +\n    JSON.stringify(Object.keys($json))\n  );\n}\n\nif (!textoResposta) {\n  throw new Error('Texto da resposta vazio');\n}\n\nconst bodyEnvio = {\n  number: numero,\n  text: textoResposta\n};\n\ntry {\n  const response = await this.helpers.httpRequest({\n    method: 'POST',\n    url: `http://evolution:8080/message/sendText/${$env.EVOLUTION_INSTANCE_NAME}`,\n    headers: {\n      apikey: $env.EVOLUTION_API_KEY,\n      'Content-Type': 'application/json'\n    },\n    body: bodyEnvio,\n    json: true\n  });\n\n  return [\n    {\n      json: {\n        ...$json,\n        numero,\n        remoteJid: $json.remoteJid || $json.remote_jid_atual || '',\n        mensagem: $json.mensagem || $json.mensagem_atual || '',\n        pushName: $json.pushName || $json.cliente?.nome || '',\n        textoResposta,\n        enviado: true,\n        bodyEnviado: bodyEnvio,\n        response\n      }\n    }\n  ];\n} catch (error) {\n  return [\n    {\n      json: {\n        ...$json,\n        enviado: false,\n        numero,\n        textoResposta,\n        bodyEnviado: bodyEnvio,\n        erroMensagem: error.message,\n        erroStatus: error.statusCode || error.response?.statusCode,\n        erroBody: error.response?.body || error.error || error.cause || error\n      }\n    }\n  ];\n}"
       },
       "type": "n8n-nodes-base.code",
@@ -196,7 +176,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO mensagens_whatsapp (\n  telefone,\n  nome,\n  role,\n  mensagem,\n  message_id,\n  tipo_mensagem\n)\nVALUES (\n  '{{ $json.numero }}',\n  '{{ ($json.pushName || \"Cliente\").replace(/'/g, \"''\") }}',\n  'assistant',\n  '{{ $json.textoResposta.replace(/'/g, \"''\") }}',\n  NULL,\n  'text'\n)\nRETURNING *;",
+        "query": "WITH resposta AS (\nINSERT INTO mensagens_whatsapp (\n  telefone,\n  nome,\n  role,\n  mensagem,\n  message_id,\n  tipo_mensagem\n)\nVALUES (\n  '{{ $json.numero }}',\n  '{{ ($json.pushName || \"Cliente\").replace(/'/g, \"''\") }}',\n  'assistant',\n  '{{ $json.textoResposta.replace(/'/g, \"''\") }}',\n  NULL,\n  'text'\n)\nRETURNING *\n),\nlead AS (\n  SELECT id FROM leads WHERE telefone = (SELECT telefone FROM resposta)\n),\nhistorico AS (\n  INSERT INTO mensagens (lead_id, telefone, direcao, conteudo)\n  SELECT\n    (SELECT id FROM lead),\n    resposta.telefone,\n    registro.direcao,\n    registro.conteudo\n  FROM resposta\n  CROSS JOIN LATERAL (\n    VALUES\n      (1, 'entrada', '{{ $('Filtrar e Extrair Dados').first().json.mensagem.replace(/'/g, \"''\") }}'::text),\n      (2, 'saida', resposta.mensagem)\n  ) AS registro(ordem, direcao, conteudo)\n  ORDER BY registro.ordem\n  RETURNING id\n)\nSELECT resposta.*\nFROM resposta\nCROSS JOIN (SELECT count(*) FROM historico) AS gravacao;",
         "options": {}
       },
       "type": "n8n-nodes-base.postgres",
@@ -581,13 +561,7 @@
     },
     "Salvar resposta Bot": {
       "main": [
-        [
-          {
-            "node": "Salvar mensagem",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Limpar resposta final": {

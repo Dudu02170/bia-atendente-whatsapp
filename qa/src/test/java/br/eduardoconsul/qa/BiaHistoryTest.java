@@ -33,9 +33,12 @@ class BiaHistoryTest {
   @BeforeEach void reset() throws Exception {
     try(var s=db.createStatement()) {
       s.execute("ALTER TABLE mensagens DROP CONSTRAINT IF EXISTS qa_reject_response");
+      s.execute("ALTER TABLE mensagens DROP CONSTRAINT IF EXISTS qa_reject_entry");
+      s.execute("ALTER TABLE mensagens_whatsapp DROP CONSTRAINT IF EXISTS qa_reject_assistant");
       s.execute("TRUNCATE mensagens,mensagens_whatsapp,leads RESTART IDENTITY CASCADE");
       s.executeUpdate("INSERT INTO leads (telefone,nome) VALUES ('550000000099','Outro QA')");
       s.executeUpdate("INSERT INTO mensagens (lead_id,telefone,direcao,conteudo) VALUES (1,'550000000099','entrada','Histórico de outro QA')");
+      s.executeUpdate("INSERT INTO mensagens_whatsapp (telefone,role,mensagem,message_id) VALUES ('"+PHONE+"','user','Entrada já recebida QA','qa-incoming')");
     }
   }
 
@@ -49,11 +52,11 @@ class BiaHistoryTest {
     if(hasLead) try(var s=db.createStatement();var rs=s.executeQuery("INSERT INTO leads (telefone,nome) VALUES ('"+PHONE+"','Lead QA') RETURNING id")) {
       assertTrue(rs.next()); expectedLead=rs.getInt(1);
     }
-    // The input to the final query is the actual JDBC row returned by the preceding query.
-    var saved=saveBot(response);
+    // Execute the single exported writer; its returned row is the real assistant INSERT result.
+    var saved=saveBot(response,received);
     assertFalse(saved.containsKey("numero")); assertFalse(saved.containsKey("textoResposta"));
     assertEquals(PHONE,saved.get("telefone")); assertEquals(response,saved.get("mensagem"));
-    try(var s=db.createStatement()) { assertEquals(2,s.executeUpdate(render("Salvar mensagem",saved,received))); }
+    assertEquals("assistant",saved.get("role")); assertNotNull(saved.get("id"));
     try(var s=db.prepareStatement("SELECT lead_id,direcao,conteudo FROM mensagens WHERE telefone=? ORDER BY id")) {
       s.setString(1,PHONE);
       try(var rs=s.executeQuery()) {
@@ -64,28 +67,61 @@ class BiaHistoryTest {
         assertFalse(rs.next());
       }
     }
+    assertMessageCounts(1);
     assertOtherHistory();
   }
 
   @Test void rejeicaoDaSaidaNaoDeixaEntradaParcialNoHistoricoFinal() throws Exception {
-    var saved=saveBot("Resposta bloqueada QA");
     // Fault injection in this disposable database only; application/schema are not relaxed.
     try(var s=db.createStatement()) {
       s.execute("ALTER TABLE mensagens ADD CONSTRAINT qa_reject_response CHECK (conteudo <> 'Resposta bloqueada QA')");
-      SQLException error=assertThrows(SQLException.class,()->s.executeUpdate(render("Salvar mensagem",saved,"Entrada QA")));
+      SQLException error=assertThrows(SQLException.class,()->saveBot("Resposta bloqueada QA","Entrada QA"));
       assertEquals("23514",error.getSQLState());
       try(var rs=s.executeQuery("SELECT count(*) FROM mensagens WHERE telefone='"+PHONE+"'")) {
         assertTrue(rs.next()); assertEquals(0,rs.getInt(1),"O par entrada/saída pertence à mesma instrução SQL");
       }
       try(var rs=s.executeQuery("SELECT count(*) FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' AND role='assistant'")) {
-        assertTrue(rs.next()); assertEquals(1,rs.getInt(1),"Não há atomicidade entre os dois nós SQL distintos");
+        assertTrue(rs.next()); assertEquals(0,rs.getInt(1),"A resposta pertence à mesma instrução SQL que o histórico");
       }
+      assertMessageCounts(0);
+      s.execute("ALTER TABLE mensagens DROP CONSTRAINT qa_reject_response");
+    }
+    // A failed database statement can be rerun directly without sending any external message.
+    saveBot("Resposta bloqueada QA","Entrada QA");
+    assertMessageCounts(1);
+    try(var s=db.createStatement();var rs=s.executeQuery("SELECT count(*) FROM mensagens WHERE telefone='"+PHONE+"'")) {
+      assertTrue(rs.next()); assertEquals(2,rs.getInt(1),"A falha anterior não deixou um histórico duplicado");
     }
     assertOtherHistory();
   }
 
-  private static Map<String,String> saveBot(String response) throws Exception {
-    try(var s=db.createStatement();var rs=s.executeQuery(render("Salvar resposta Bot",Map.of("numero",PHONE,"pushName","Cliente D'Ávila QA","textoResposta",response),""))) {
+  @ParameterizedTest(name="falha atômica: {0}")
+  @ValueSource(strings={"entrada","assistant"})
+  void falhasEmOutrosRegistrosTambemRevertemTodaPersistencia(String stage) throws Exception {
+    try(var s=db.createStatement()) {
+      s.execute(stage.equals("entrada")
+        ? "ALTER TABLE mensagens ADD CONSTRAINT qa_reject_entry CHECK (conteudo <> 'Entrada bloqueada QA')"
+        : "ALTER TABLE mensagens_whatsapp ADD CONSTRAINT qa_reject_assistant CHECK (role <> 'assistant')");
+      SQLException error=assertThrows(SQLException.class,()->saveBot("Resposta QA","Entrada bloqueada QA"));
+      assertEquals("23514",error.getSQLState());
+      try(var rs=s.executeQuery("SELECT count(*) FROM mensagens WHERE telefone='"+PHONE+"'")) {
+        assertTrue(rs.next()); assertEquals(0,rs.getInt(1),"Não deixa entrada/saída parciais");
+      }
+    }
+    assertMessageCounts(0); assertOtherHistory();
+  }
+
+  private static void assertMessageCounts(int assistants) throws Exception {
+    try(var s=db.createStatement();var rs=s.executeQuery("SELECT role,mensagem,message_id FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' ORDER BY id")) {
+      assertTrue(rs.next()); assertEquals("user",rs.getString("role"));
+      assertEquals("Entrada já recebida QA",rs.getString("mensagem")); assertEquals("qa-incoming",rs.getString("message_id"));
+      int count=0; while(rs.next()) { assertEquals("assistant",rs.getString("role")); count++; }
+      assertEquals(assistants,count,"Preserva a entrada anterior e só confirma assistant após gravar todo o histórico");
+    }
+  }
+
+  private static Map<String,String> saveBot(String response,String received) throws Exception {
+    try(var s=db.createStatement();var rs=s.executeQuery(render("Salvar resposta Bot",Map.of("numero",PHONE,"pushName","Cliente D'Ávila QA","textoResposta",response),received))) {
       assertTrue(rs.next()); Map<String,String> row=new HashMap<>();
       for(int i=1;i<=rs.getMetaData().getColumnCount();i++) row.put(rs.getMetaData().getColumnLabel(i),rs.getString(i));
       assertFalse(rs.next()); return row;

@@ -48,7 +48,8 @@ class BiaWorkflowTest {
     }
     assertFalse(visited.contains("Salvar resposta Bot"));
     assertFalse(visited.contains("Salvar mensagem"));
-    assertSingleMainTarget(workflow.path("connections").path("Salvar resposta Bot").path("main").path(0),"Salvar mensagem","Caminho de sucesso preservado");
+    assertFalse(nodes.containsKey("Salvar mensagem"),"Não mantém um segundo escritor que possa duplicar o histórico");
+    assertEquals(0,workflow.path("connections").path("Salvar resposta Bot").path("main").path(0).size(),"Persistência atômica encerra o caminho de sucesso");
   }
   @Test void conexoesReferenciamNosExistentes() {
     var source=workflow.path("connections").fields();
