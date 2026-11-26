@@ -152,7 +152,9 @@ class BiaWorkflowTest {
 
   @Test void nenhumCaminhoDeEnvioContornaFiltrosObrigatorios() {
     assertTrue(reachesSendWithout(null),"Pré-condição: envio deve ser alcançável");
-    for(String required:List.of("Filtrar e Extrair Dados","If","Validador final","Autorizar envio atual")) {
+    for(String flag:List.of("alwaysOutputData","continueOnFail","retryOnFail"))
+      assertEquals(Boolean.FALSE,nodes.get("Salvar mensagem do cliente").path(flag).booleanValue(),flag+": gravação não pode fabricar identidade nem continuar na falha");
+    for(String required:List.of("Filtrar e Extrair Dados","Salvar mensagem do cliente","If","Validador final","Autorizar envio atual")) {
       JsonNode node=nodes.get(required);
       assertNotNull(node,"Controle obrigatório ausente: "+required);
       assertFalse(node.path("disabled").asBoolean(false),"Controle desativado: "+required);

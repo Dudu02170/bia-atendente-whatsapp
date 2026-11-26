@@ -194,7 +194,7 @@ class BiaSendAuthorizationTest {
   }
   private static String render(String name,Map<String,?> input,Map<String,?> filter) throws Exception {
     return process("support/render-query.cjs",Map.of("query",Objects.requireNonNull(queries.get(name)),"input",input,
-      "nodes",Map.of("Filtrar e Extrair Dados",filter)));
+      "nodes",Map.of("Filtrar e Extrair Dados",filter,"Salvar mensagem do cliente",Map.of())));
   }
   private static JsonNode runSender(Map<String,?> authorization) throws Exception {
     return JSON.readTree(process("support/send-message.cjs",Map.of("code",sender,"input",authorization,
