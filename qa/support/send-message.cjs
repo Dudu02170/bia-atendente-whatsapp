@@ -9,7 +9,7 @@ vm.runInContext(`
   const fixture = JSON.parse(fixtureJSON);
   delete globalThis.fixtureJSON;
   const $json = fixture.input;
-  const $env = Object.freeze({ EVOLUTION_INSTANCE_NAME: 'qa-isolated', EVOLUTION_API_KEY: 'qa-fake-key' });
+  const $env = Object.freeze({ EVOLUTION_INSTANCE_NAME: 'qa-isolated', EVOLUTION_API_KEY: 'qa-fake-key', ANTHROPIC_API_KEY: 'qa-fake-anthropic-key' });
   const calls = [];
   const helpers = Object.freeze({
     async httpRequest(options) {

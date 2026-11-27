@@ -89,3 +89,8 @@ Domínio em credencial, host com sufixo/subdomínio, caminho ou query não torna
 Limpar resposta final escapa o primeiro nome de pushName ou cliente.nome antes de construir as duas expressões de remoção de saudação repetida. Parênteses, colchetes, ponto, + e outros metacaracteres não podem alterar a expressão nem causar exceção. A remoção exige limite após o nome; Ana não remove parte de Anabela. A mensagem padrão existente é aplicada após essa etapa para impedir resposta vazia quando só o nome foi removido.
 
 Fonte do nome, demais regras de limpeza, metadados e limites continuam. Testes Java executam limpeza/validação exportadas e transportam a saída ao remetente com autorização fictícia/HTTP simulado, sem runtime n8n ou mensagem externa.
+
+## Tipo textual obrigatório na resposta
+Limpar resposta final, Validador final e Enviar mensagem exigem textoResposta string antes de processar. Objeto/array/número/booleano/null não é convertido em texto: retorna zero itens e não tenta envio. Ausência/string vazia mantêm a recusa existente; strings continuam seguindo as regras de limpeza, fallback e limites já presentes.
+
+Chamar IA verifica o tipo de response.content[0].text antes de replace; tipo incompatível gera Resposta da IA sem texto válido, sem resposta inventada/retry. Erros HTTP existentes continuam propagados. A sequência é testada pelos Code exportados com IA/HTTP/autorização simulados, chave fictícia e nenhum .env; não é integração real ou execução n8n.
