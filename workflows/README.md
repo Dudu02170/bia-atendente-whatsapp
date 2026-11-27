@@ -104,3 +104,8 @@ A regressão de links acompanha os Code da IA até o remetente, com e sem histó
 Os quatro Code de resposta protegem temporariamente as URLs reconhecidas enquanto aplicam Markdown/tom, preservando _, * e palavras como top dentro de caminho/query/fragmento. Controles são removidos antes de proteger; marcadores usam prefixo sem colisão com texto/metadados. URLs são restauradas antes da validação de domínio e dos limites existentes, sem marcadores novos no corpo enviado.
 
 Texto fora da URL continua normalizado; Markdown externo ao link é removido. A proteção não autoriza domínio externo nem evita limite de tamanho. Reconhecimento continua restrito aos formatos já tratados, sem parser universal de URI/Markdown. Regressões conferem essas propriedades pelos Code exportados e remetente simulado, sem runtime n8n/serviços reais.
+
+## Corte por tamanho mantém URLs atômicas
+Nos limitadores da IA, limpeza e validação, uma URL individual maior que o orçamento usa o site configurado. Se o limite atravessar outra URL, o trecho termina antes dela, omitindo-a inteira. Pontuação interna de URL não é fim de frase; o corte também não divide pares UTF-16. Links que terminam exatamente no limite são preservados.
+
+Orçamentos anteriores continuam: IA 650, limpeza 650/1200 e validador 750/1200 conforme tipo. Texto curto/metadados e políticas restantes mantidos; o remetente não ganhou limite novo. Reconhecimento é o existente, sem parser universal de URI. Regressões executam Code exportado e envio simulado, sem runtime n8n ou serviços reais.

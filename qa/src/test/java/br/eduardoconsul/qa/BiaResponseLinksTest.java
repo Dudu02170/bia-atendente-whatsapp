@@ -88,7 +88,7 @@ class BiaResponseLinksTest {
       "Marcador "+marker+" e https://www.suaempresa.com.br/resina_a_b");
   }
   @Test void protecaoNaoContornaLimitesDeTamanho() throws Exception {
-    String text="Veja https://www.suaempresa.com.br/resina_a_b?src="+"a".repeat(900);
+    String text="Veja https://www.suaempresa.com.br/resina_a_b?src=qa_a_b "+"a".repeat(900);
     var input=Map.of("numero","550000000001","intencao","duvida","textoResposta",text);
     for(String step:List.of(ai,cleaner,validator)) {
       JsonNode out=run(step,input,Map.of("content",List.of(Map.of("text",text))));
