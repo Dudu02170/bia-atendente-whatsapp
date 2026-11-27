@@ -84,3 +84,8 @@ Isso identifica a entrada, não reserva a tentativa de envio: autorizações sim
 Validador final preserva links com autoridade exatamente suaempresa.com.br ou www.suaempresa.com.br, inclusive HTTP(S), caminho, query e fragmento. O domínio é o placeholder já configurado neste projeto. URLs explícitas de outra autoridade e alternativas conhecidas viram www.suaempresa.com.br em uma única passagem, sem reprocessar o endereço inserido. Pontuação final fica fora da substituição. Revalidar a resposta não duplica www nem .br.
 
 Domínio em credencial, host com sufixo/subdomínio, caminho ou query não torna a URL oficial. Porta explícita também usa substituição. A regra reconhece HTTP(S)/www e alternativas já tratadas, não todos os esquemas ou domínios soltos. Demais políticas/limites do validador permanecem. Testes Java executam o Code exportado em adaptador isolado e transportam sua saída ao remetente com HTTP simulado; não validam site, rede ou runtime n8n.
+
+## Nome do cliente tratado como texto literal
+Limpar resposta final escapa o primeiro nome de pushName ou cliente.nome antes de construir as duas expressões de remoção de saudação repetida. Parênteses, colchetes, ponto, + e outros metacaracteres não podem alterar a expressão nem causar exceção. A remoção exige limite após o nome; Ana não remove parte de Anabela. A mensagem padrão existente é aplicada após essa etapa para impedir resposta vazia quando só o nome foi removido.
+
+Fonte do nome, demais regras de limpeza, metadados e limites continuam. Testes Java executam limpeza/validação exportadas e transportam a saída ao remetente com autorização fictícia/HTTP simulado, sem runtime n8n ou mensagem externa.
