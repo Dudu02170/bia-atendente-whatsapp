@@ -67,6 +67,36 @@ class BiaSendMessageTest {
     assertEquals(0, out.path("calls").size());
   }
 
+  @ParameterizedTest(name="recibo incompatível: {0}")
+  @ValueSource(strings={"null","{}","[]","true","\"QA\"","{\"key\":{}}","{\"key\":{\"id\":\"\"}}",
+    "{\"key\":{\"id\":\"   \"}}","{\"key\":{\"id\":42}}","{\"key\":[]}",
+    "{\"key\":{\"id\":\"qa\"},\"status\":\"ERROR\"}","{\"key\":{\"id\":\"qa\"},\"status\":400}",
+    "{\"key\":{\"id\":\"qa\"},\"error\":\"Falha QA\"}","{\"key\":{\"id\":\"qa\"},\"status\":0}"})
+  void respostaResolvidaSemConfirmacaoNaoMarcaEnvioComoSucesso(String json) throws Exception {
+    JsonNode response=JSON.readTree(json);
+    var data=Map.of("numero","550000000001","textoResposta","  Resposta QA  ","message_id_atual","qa-receipt","mensagem_origem_id",7);
+    JsonNode out=runEnvelope(Map.of("autorizado",true,"dados_envio",data),Map.of("response",response));
+    assertFalse(out.has("error")); assertEquals(1,out.path("result").size()); assertRequest(out);
+    JsonNode row=out.path("result").get(0).path("json");
+    assertTrue(row.path("enviado").isBoolean()); assertFalse(row.path("enviado").asBoolean());
+    assertEquals("indeterminado",row.path("resultadoEnvio").asText());
+    assertEquals("Resposta da Evolution sem confirmação válida de envio",row.path("erroMensagem").asText());
+    assertEquals(response,row.path("erroBody"),"Preserva corpo recebido para inspeção, sem presumir falha definitiva");
+    assertEquals("qa-receipt",row.path("message_id_atual").asText()); assertEquals(7,row.path("mensagem_origem_id").asInt());
+    assertEquals("Resposta QA",row.path("textoResposta").asText());
+    assertEquals("Resposta QA",out.path("calls").get(0).path("body").path("text").asText());
+  }
+
+  @ParameterizedTest(name="recibo com ID e status: {0}")
+  @ValueSource(strings={"PENDING","SERVER_ACK","DELIVERY_ACK","READ","PLAYED"})
+  void reciboIdentificadoPreservaStatusSemConfundirComEntrega(String status) throws Exception {
+    var response=Map.of("key",Map.of("id","qa-sent","fromMe",true,"remoteJid","550000000001@s.whatsapp.net"),"status",status);
+    JsonNode out=run(Map.of("numero","550000000001","textoResposta","Resposta QA"),Map.of("response",response));
+    assertFalse(out.has("error")); assertRequest(out); assertEquals(1,out.path("result").size());
+    JsonNode row=out.path("result").get(0).path("json"); assertTrue(row.path("enviado").asBoolean());
+    assertEquals(JSON.valueToTree(response),row.path("response"));
+  }
+
   private static void assertRequest(JsonNode out) {
     assertEquals(1, out.path("calls").size(), "Uma tentativa; o stub não faz rede");
     JsonNode call = out.path("calls").get(0);

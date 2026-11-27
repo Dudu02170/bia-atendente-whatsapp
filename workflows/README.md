@@ -109,3 +109,8 @@ Texto fora da URL continua normalizado; Markdown externo ao link é removido. A 
 Nos limitadores da IA, limpeza e validação, uma URL individual maior que o orçamento usa o site configurado. Se o limite atravessar outra URL, o trecho termina antes dela, omitindo-a inteira. Pontuação interna de URL não é fim de frase; o corte também não divide pares UTF-16. Links que terminam exatamente no limite são preservados.
 
 Orçamentos anteriores continuam: IA 650, limpeza 650/1200 e validador 750/1200 conforme tipo. Texto curto/metadados e políticas restantes mantidos; o remetente não ganhou limite novo. Reconhecimento é o existente, sem parser universal de URI. Regressões executam Code exportado e envio simulado, sem runtime n8n ou serviços reais.
+
+## Confirmação mínima da resposta da Evolution
+Enviar mensagem só retorna enviado=true quando recebe objeto com key.id string não vazia e sem erro explícito no corpo. Resposta vazia/incompatível recebe enviado=false e resultadoEnvio=indeterminado, preservando corpo para inspeção. O gate de persistência continua exigindo true estrito. Uma única tentativa; sem retry.
+
+Critério conferido no canal Baileys da Evolution 2.3.7 do compose, fonte primária fixada no commit cd800f2976e1e5b682fbf86a01ee4d85ae61f370: https://github.com/evolution-foundation/evolution-api/blob/cd800f2976e1e5b682fbf86a01ee4d85ae61f370/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts#L4652. Identificação do recibo não comprova entrega/leitura; resultado incompatível não comprova que nada foi enviado. Reconciliar antes de qualquer reenvio. Testes usam HTTP simulado e contrato estrutural do gate, sem serviço real ou runtime n8n.
