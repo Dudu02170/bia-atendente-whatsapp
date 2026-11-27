@@ -45,7 +45,19 @@ class BiaResponseLinksTest {
     "https://suaempresa.com.br@exemplo.invalid|www.suaempresa.com.br",
     "https://exemplo.invalid/?site=suaempresa.com.br|www.suaempresa.com.br",
     "https://sub.suaempresa.com.br|www.suaempresa.com.br",
-    "www.suaempresa.com.br.exemplo.invalid|www.suaempresa.com.br"
+    "www.suaempresa.com.br.exemplo.invalid|www.suaempresa.com.br",
+    "https://www.suaempresa.com.br/resina_a_b|https://www.suaempresa.com.br/resina_a_b",
+    "http://suaempresa.com.br/catalogo?src=qa_a_b|http://suaempresa.com.br/catalogo?src=qa_a_b",
+    "www.suaempresa.com.br/produto_a_b#uso_c_d|www.suaempresa.com.br/produto_a_b#uso_c_d",
+    "suaempresa.com.br/linha_a_b|suaempresa.com.br/linha_a_b",
+    "https://www.suaempresa.com.br/top|https://www.suaempresa.com.br/top",
+    "https://www.suaempresa.com.br/tri?top=top|https://www.suaempresa.com.br/tri?top=top",
+    "https://www.suaempresa.com.br/massa#tri|https://www.suaempresa.com.br/massa#tri",
+    "https://www.suaempresa.com.br/PROD_A_PROD_B|https://www.suaempresa.com.br/PROD_A_PROD_B",
+    "https://suaempresa.com.br.exemplo.invalid/top_a_b|www.suaempresa.com.br",
+    "https://example.invalid/?link=suaempresa.com.br/top_a_b|www.suaempresa.com.br",
+    "https://www.suaempresa.com.br/resina*a*b?src=qa*test|https://www.suaempresa.com.br/resina*a*b?src=qa*test",
+    "https://www.suaempresa.com.br/linha_a_b_|https://www.suaempresa.com.br/linha_a_b_"
   },delimiter='|',quoteCharacter='"')
   void preservaAutoridadeOficialECorrigeLinksSemCascata(String link,String expected) throws Exception {
     assertResponse("Acesse "+link,"Acesse "+expected);
@@ -59,6 +71,33 @@ class BiaResponseLinksTest {
   @Test void preservaPontuacaoParagrafosETextoSemLinks() throws Exception {
     assertResponse("Veja (https://suaempresa.store), ou https://www.suaempresa.com.br/catalogo.\n\nQual material você pretende usar?",
       "Veja ("+OFFICIAL+"), ou https://www.suaempresa.com.br/catalogo.\n\nQual material você pretende usar?");
+  }
+
+  @Test void removeMarkdownExternoSemAlterarUrl() throws Exception {
+    String url="https://www.suaempresa.com.br/resina_a_b?src=c_d_e#top";
+    for(String delimiter:List.of("**","`","_","__"))
+      assertResponse("Veja "+delimiter+url+delimiter+".","Veja "+url+".");
+  }
+  @Test void regrasDeTomContinuamNoTextoForaDaUrl() throws Exception {
+    assertResponse("Confira a opção **top** em https://www.suaempresa.com.br/top.",
+      "Confira a opção ótimo em https://www.suaempresa.com.br/top.");
+  }
+  @Test void restauraSemColidirComTextoEContinuaRemovendoControles() throws Exception {
+    String marker="\uE000LINK0\uE001";
+    assertResponse("Marcador "+marker+" e https://www.suaempresa.com.br/resina"+(char)0+"_a_b",
+      "Marcador "+marker+" e https://www.suaempresa.com.br/resina_a_b");
+  }
+  @Test void protecaoNaoContornaLimitesDeTamanho() throws Exception {
+    String text="Veja https://www.suaempresa.com.br/resina_a_b?src="+"a".repeat(900);
+    var input=Map.of("numero","550000000001","intencao","duvida","textoResposta",text);
+    for(String step:List.of(ai,cleaner,validator)) {
+      JsonNode out=run(step,input,Map.of("content",List.of(Map.of("text",text))));
+      assertFalse(out.has("error")); assertEquals(1,out.path("result").size());
+      String result=out.path("result").get(0).path("json").path("textoResposta").asText();
+      assertTrue(result.startsWith("Veja https://www.suaempresa.com.br/resina_a_b?src="));
+      assertTrue(result.length()<=(step.equals(validator)?750:650),"Restaura antes de limitar");
+      assertFalse(result.contains("\uE000LINK"));
+    }
   }
 
   private static void assertResponse(String text,String expected) throws Exception {

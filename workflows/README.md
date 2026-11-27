@@ -99,3 +99,8 @@ Chamar IA verifica o tipo de response.content[0].text antes de replace; tipo inc
 Chamar IA usa a mesma regra de normalização em uma passagem do Validador final. Um link oficial com caminho/query/fragmento não é mais reduzido ao site base antes das etapas seguintes. URLs explícitas de outra autoridade e alternativas conhecidas usam o site já configurado uma vez, sem cascata; pontuação é preservada. Prompts, contexto, modelo e demais transformações/limites de texto continuam.
 
 A regressão de links acompanha os Code da IA até o remetente, com e sem histórico, mantendo os testes diretos anteriores. IA, autorização e HTTP são fixtures explícitas: não executa runtime/item linking n8n ou serviços/site reais. Domínio continua sendo o placeholder existente, sem migração/dados alterados.
+
+## URLs protegidas das regras de Markdown e tom
+Os quatro Code de resposta protegem temporariamente as URLs reconhecidas enquanto aplicam Markdown/tom, preservando _, * e palavras como top dentro de caminho/query/fragmento. Controles são removidos antes de proteger; marcadores usam prefixo sem colisão com texto/metadados. URLs são restauradas antes da validação de domínio e dos limites existentes, sem marcadores novos no corpo enviado.
+
+Texto fora da URL continua normalizado; Markdown externo ao link é removido. A proteção não autoriza domínio externo nem evita limite de tamanho. Reconhecimento continua restrito aos formatos já tratados, sem parser universal de URI/Markdown. Regressões conferem essas propriedades pelos Code exportados e remetente simulado, sem runtime n8n/serviços reais.
