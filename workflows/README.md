@@ -94,3 +94,8 @@ Fonte do nome, demais regras de limpeza, metadados e limites continuam. Testes J
 Limpar resposta final, Validador final e Enviar mensagem exigem textoResposta string antes de processar. Objeto/array/número/booleano/null não é convertido em texto: retorna zero itens e não tenta envio. Ausência/string vazia mantêm a recusa existente; strings continuam seguindo as regras de limpeza, fallback e limites já presentes.
 
 Chamar IA verifica o tipo de response.content[0].text antes de replace; tipo incompatível gera Resposta da IA sem texto válido, sem resposta inventada/retry. Erros HTTP existentes continuam propagados. A sequência é testada pelos Code exportados com IA/HTTP/autorização simulados, chave fictícia e nenhum .env; não é integração real ou execução n8n.
+
+## Links na resposta da IA antes da limpeza final
+Chamar IA usa a mesma regra de normalização em uma passagem do Validador final. Um link oficial com caminho/query/fragmento não é mais reduzido ao site base antes das etapas seguintes. URLs explícitas de outra autoridade e alternativas conhecidas usam o site já configurado uma vez, sem cascata; pontuação é preservada. Prompts, contexto, modelo e demais transformações/limites de texto continuam.
+
+A regressão de links acompanha os Code da IA até o remetente, com e sem histórico, mantendo os testes diretos anteriores. IA, autorização e HTTP são fixtures explícitas: não executa runtime/item linking n8n ou serviços/site reais. Domínio continua sendo o placeholder existente, sem migração/dados alterados.

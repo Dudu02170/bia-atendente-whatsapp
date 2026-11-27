@@ -14,14 +14,16 @@ import static org.junit.jupiter.api.Assertions.*;
 class BiaResponseLinksTest {
   private static final ObjectMapper JSON=new ObjectMapper();
   private static final String OFFICIAL="www.suaempresa.com.br";
-  private static String validator,sender;
+  private static String validator,sender,ai,cleaner;
 
   @BeforeAll static void load() throws Exception {
     for(JsonNode node:JSON.readTree(Path.of("../workflows/bia-atendimento.json").toFile()).path("nodes")) {
       if(node.path("name").asText().equals("Validador final")) validator=node.path("parameters").path("jsCode").asText();
       if(node.path("name").asText().equals("Enviar mensagem")) sender=node.path("parameters").path("jsCode").asText();
+      if(node.path("name").asText().equals("Chamar IA")) ai=node.path("parameters").path("jsCode").asText();
+      if(node.path("name").asText().equals("Limpar resposta final")) cleaner=node.path("parameters").path("jsCode").asText();
     }
-    assertNotNull(validator); assertNotNull(sender);
+    assertNotNull(validator); assertNotNull(sender); assertNotNull(ai); assertNotNull(cleaner);
   }
 
   @ParameterizedTest(name="link de resposta: {0}")
@@ -81,13 +83,46 @@ class BiaResponseLinksTest {
     assertEquals("550000000001",sent.path("calls").get(0).path("body").path("number").asText());
     assertTrue(sent.path("result").get(0).path("json").path("enviado").asBoolean());
     assertEquals(7,sent.path("result").get(0).path("json").path("mensagem_origem_id").asInt());
+    // Extend every existing vector through the AI response path, retaining all direct validator assertions.
+    for(boolean ongoing:List.of(false,true)) assertAiPath(input,text,expected,ongoing);
+
+  }
+
+  private static void assertAiPath(Map<String,?> original,String text,String expected,boolean ongoing) throws Exception {
+    Map<String,Object> input=new HashMap<>(original); input.remove("textoResposta");
+    input.put("intencao","duvida"); input.put("mensagem","Entrada QA"); input.put("conversaEmAndamento",ongoing);
+    input.put("historico_recente",ongoing?List.of(Map.of("role","user","mensagem","Histórico fictício QA")):List.of());
+    JsonNode aiOut=run(ai,input,Map.of("content",List.of(Map.of("text",text))));
+    assertFalse(aiOut.has("error")); assertEquals(1,aiOut.path("calls").size()); assertEquals(1,aiOut.path("result").size());
+    JsonNode request=aiOut.path("calls").get(0);
+    assertEquals("https://api.anthropic.com/v1/messages",request.path("url").asText());
+    assertEquals("qa-fake-anthropic-key",request.path("headers").path("x-api-key").asText());
+    JsonNode row=aiOut.path("result").get(0).path("json");
+    assertEquals(expected,row.path("textoResposta").asText(),"IA preserva link antes das etapas posteriores");
+    assertEquals(ongoing,row.path("conversaEmAndamento").asBoolean()); assertEquals("chamar_ia",row.path("origemResposta").asText());
+    for(String step:List.of(cleaner,validator)) {
+      JsonNode out=run(step,JSON.convertValue(row,new TypeReference<Map<String,Object>>() {}));
+      assertFalse(out.has("error")); assertEquals(0,out.path("calls").size()); assertEquals(1,out.path("result").size());
+      row=out.path("result").get(0).path("json"); assertEquals(expected,row.path("textoResposta").asText());
+    }
+    for(String field:List.of("numero","message_id_atual","mensagem_origem_id","pushName","extraQA"))
+      assertEquals(JSON.valueToTree(original.get(field)),row.path(field));
+    JsonNode sent=run(sender,Map.of("autorizado",true,"dados_envio",JSON.convertValue(row,new TypeReference<Map<String,Object>>() {})));
+    assertFalse(sent.has("error")); assertEquals(1,sent.path("calls").size()); assertEquals(1,sent.path("result").size());
+    assertEquals(expected,sent.path("calls").get(0).path("body").path("text").asText());
+    assertEquals("550000000001",sent.path("calls").get(0).path("body").path("number").asText());
+    assertTrue(sent.path("result").get(0).path("json").path("enviado").asBoolean());
+    assertEquals(7,sent.path("result").get(0).path("json").path("mensagem_origem_id").asInt());
   }
 
   private static JsonNode run(String code,Map<String,?> input) throws Exception {
+    return run(code,input,Map.of("key",Map.of("id","qa-sent")));
+  }
+  private static JsonNode run(String code,Map<String,?> input,Map<String,?> response) throws Exception {
     Process p=new ProcessBuilder("node","support/send-message.cjs").redirectErrorStream(true).start();
     try {
       try(var stdin=p.getOutputStream()) { stdin.write(JSON.writeValueAsBytes(Map.of("code",code,"input",input,
-        "http",Map.of("response",Map.of("key",Map.of("id","qa-sent")))))); }
+        "http",Map.of("response",response)))); }
       assertTrue(p.waitFor(10,TimeUnit.SECONDS));
       String result=new String(p.getInputStream().readAllBytes(),StandardCharsets.UTF_8);
       assertEquals(0,p.exitValue(),result); return JSON.readTree(result);
