@@ -16,13 +16,16 @@ class BiaHistoryTest {
   private static final ObjectMapper JSON = new ObjectMapper();
   private static PostgreSQLContainer pg;
   private static Connection db;
+  private static String sender;
   private static final Map<String,String> queries = new HashMap<>();
   private static final String PHONE = "550000000001";
 
   @BeforeAll static void start() throws Exception {
-    for (JsonNode node : JSON.readTree(Path.of("../workflows/bia-atendimento.json").toFile()).path("nodes"))
+    for (JsonNode node : JSON.readTree(Path.of("../workflows/bia-atendimento.json").toFile()).path("nodes")) {
       if (node.path("parameters").has("query"))
         queries.put(node.path("name").asText(),node.path("parameters").path("query").asText());
+      if(node.path("name").asText().equals("Enviar mensagem")) sender=node.path("parameters").path("jsCode").asText();
+    }
     pg=new PostgreSQLContainer("postgres:16-alpine").withDatabaseName("bia_qa").withUsername("qa").withPassword("qa-local-only");
     pg.start(); db=DriverManager.getConnection(pg.getJdbcUrl(),pg.getUsername(),pg.getPassword());
     try(var s=db.createStatement()) { s.execute(Files.readString(Path.of("../sql/01-schema.sql"))); }
@@ -194,6 +197,71 @@ class BiaHistoryTest {
     assertOtherHistory();
   }
 
+  @ParameterizedTest(name="recibo preservado: {0}")
+  @ValueSource(strings={"qa-receipt","qa'id"})
+  void preservaIdDoReciboDoRemetenteNaPersistencia(String receipt) throws Exception {
+    int origin=originId();
+    var sent=senderResult(receipt);
+    var saved=saveInput(sent,"Entrada já recebida QA");
+    assertEquals(receipt,saved.get("message_id")); assertEquals(Integer.toString(origin),saved.get("mensagem_origem_id"));
+    try(var s=db.prepareStatement("SELECT telefone,role,mensagem,mensagem_origem_id FROM mensagens_whatsapp WHERE message_id=?")) {
+      s.setString(1,receipt);
+      try(var rs=s.executeQuery()) {
+        assertTrue(rs.next()); assertEquals(PHONE,rs.getString("telefone")); assertEquals("assistant",rs.getString("role"));
+        assertEquals("Resposta D'Ávila QA",rs.getString("mensagem")); assertEquals(origin,rs.getInt("mensagem_origem_id")); assertFalse(rs.next());
+      }
+    }
+    try(var s=db.createStatement();var rs=s.executeQuery("SELECT direcao,conteudo FROM mensagens WHERE telefone='"+PHONE+"' ORDER BY id")) {
+      assertTrue(rs.next()); assertEquals("entrada",rs.getString("direcao")); assertEquals("Entrada já recebida QA",rs.getString("conteudo"));
+      assertTrue(rs.next()); assertEquals("saida",rs.getString("direcao")); assertEquals("Resposta D'Ávila QA",rs.getString("conteudo")); assertFalse(rs.next());
+    }
+    assertMessageCounts(1); assertOtherHistory();
+  }
+
+  @ParameterizedTest(name="colisão de recibo: {0}")
+  @ValueSource(strings={"user","assistant","outroTelefone"})
+  void colisaoDeIdNaoSobrescreveNemDeixaHistoricoParcial(String scenario) throws Exception {
+    String receipt=scenario.equals("user")?"qa-incoming":"qa-used";
+    if(!scenario.equals("user")) try(var s=db.createStatement()) {
+      String phone=scenario.equals("outroTelefone")?"550000000002":PHONE;
+      s.executeUpdate("INSERT INTO mensagens_whatsapp(telefone,role,mensagem,message_id) VALUES ('"+phone+"','assistant','Resposta anterior QA','qa-used')");
+    }
+    String before=snapshot(); var sent=senderResult(receipt);
+    SQLException error=assertThrows(SQLException.class,()->saveInput(sent,"Entrada já recebida QA"));
+    assertEquals("23505",error.getSQLState(),"Constraint existente rejeita recibo duplicado");
+    assertEquals(before,snapshot(),"Nenhuma linha existente é associada/substituída e o par final não é gravado parcialmente");
+    assertOtherHistory();
+  }
+
+  @Test void legadoSemReciboContinuaComIdExternoNull() throws Exception {
+    var saved=saveBot("Resposta legada QA","Entrada já recebida QA",originId());
+    assertNull(saved.get("message_id")); assertMessageCounts(1); assertOtherHistory();
+  }
+
+  private static Map<String,Object> senderResult(String receipt) throws Exception {
+    var data=Map.of("numero",PHONE,"textoResposta","Resposta D'Ávila QA","pushName","Cliente QA",
+      "mensagem","Entrada já recebida QA","mensagem_origem_id",originId());
+    Process p=new ProcessBuilder("node","support/send-message.cjs").redirectErrorStream(true).start();
+    try {
+      try(var stdin=p.getOutputStream()) { stdin.write(JSON.writeValueAsBytes(Map.of("code",sender,"input",Map.of("autorizado",true,"dados_envio",data),
+        "http",Map.of("response",Map.of("key",Map.of("id",receipt),"status","PENDING"))))); }
+      assertTrue(p.waitFor(10,TimeUnit.SECONDS)); String output=new String(p.getInputStream().readAllBytes(),StandardCharsets.UTF_8);
+      assertEquals(0,p.exitValue(),output); JsonNode out=JSON.readTree(output); assertFalse(out.has("error"));
+      assertEquals(1,out.path("calls").size()); assertEquals(1,out.path("result").size());
+      JsonNode row=out.path("result").get(0).path("json"); assertTrue(row.path("enviado").asBoolean());
+      assertEquals(receipt,row.path("response").path("key").path("id").asText());
+      return JSON.convertValue(row,new com.fasterxml.jackson.core.type.TypeReference<Map<String,Object>>() {});
+    } finally { if(p.isAlive()) p.destroyForcibly(); }
+  }
+  private static String snapshot() throws Exception {
+    StringBuilder snapshot=new StringBuilder();
+    for(String table:List.of("mensagens_whatsapp","mensagens","leads"))
+      try(var s=db.createStatement();var rs=s.executeQuery("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb)::text FROM "+table+" t")) {
+        assertTrue(rs.next()); snapshot.append(table).append(rs.getString(1));
+      }
+    return snapshot.toString();
+  }
+
   private static int originId() throws Exception {
     try(var s=db.createStatement();var rs=s.executeQuery("SELECT id FROM mensagens_whatsapp WHERE telefone='"+PHONE+"' AND role='user'")) {
       assertTrue(rs.next()); return rs.getInt(1);
@@ -211,6 +279,9 @@ class BiaHistoryTest {
   private static Map<String,String> saveBot(String response,String received,Integer origin) throws Exception {
     Map<String,Object> input=new HashMap<>(Map.of("numero",PHONE,"pushName","Cliente D'Ávila QA","textoResposta",response));
     if(origin!=null) input.put("mensagem_origem_id",origin);
+    return saveInput(input,received);
+  }
+  private static Map<String,String> saveInput(Map<String,?> input,String received) throws Exception {
     try(var s=db.createStatement();var rs=s.executeQuery(render("Salvar resposta Bot",input,received))) {
       assertTrue(rs.next()); Map<String,String> row=new HashMap<>();
       for(int i=1;i<=rs.getMetaData().getColumnCount();i++) row.put(rs.getMetaData().getColumnLabel(i),rs.getString(i));

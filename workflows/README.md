@@ -114,3 +114,8 @@ Orçamentos anteriores continuam: IA 650, limpeza 650/1200 e validador 750/1200 
 Enviar mensagem só retorna enviado=true quando recebe objeto com key.id string não vazia e sem erro explícito no corpo. Resposta vazia/incompatível recebe enviado=false e resultadoEnvio=indeterminado, preservando corpo para inspeção. O gate de persistência continua exigindo true estrito. Uma única tentativa; sem retry.
 
 Critério conferido no canal Baileys da Evolution 2.3.7 do compose, fonte primária fixada no commit cd800f2976e1e5b682fbf86a01ee4d85ae61f370: https://github.com/evolution-foundation/evolution-api/blob/cd800f2976e1e5b682fbf86a01ee4d85ae61f370/src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts#L4652. Identificação do recibo não comprova entrega/leitura; resultado incompatível não comprova que nada foi enviado. Reconciliar antes de qualquer reenvio. Testes usam HTTP simulado e contrato estrutural do gate, sem serviço real ou runtime n8n.
+
+## ID externo da resposta no histórico
+Salvar resposta Bot grava response.key.id em mensagens_whatsapp.message_id quando recebe string não vazia, preservando valor e escape. O ID interno mensagem_origem_id continua ligando a entrada user; os campos têm papéis distintos. Ausência/incompatibilidade/vazio preserva NULL para legado, sem backfill ou ID inventado.
+
+A constraint unique existente permanece: repetir ID externo rejeita toda a instrução, sem sobrescrever registro nem deixar resposta/histórico parcial. Não é deduplicação de envio ou retry idempotente; erro de banco após envio requer inspeção/reconciliação. Nenhuma migração adicional. Regressões usam SQL real em PostgreSQL descartável e saída do remetente com HTTP simulado, sem runtime n8n/serviço real.
