@@ -367,7 +367,9 @@ class BiaHistoryTest {
   private static Map<String,String> saveInput(Map<String,?> input,String received) throws Exception {
     try(var s=db.createStatement();var rs=s.executeQuery(render("Salvar resposta Bot",input,received))) {
       assertTrue(rs.next()); Map<String,String> row=new HashMap<>();
-      for(int i=1;i<=rs.getMetaData().getColumnCount();i++) row.put(rs.getMetaData().getColumnLabel(i),rs.getString(i));
+      // JDBC getString renders PostgreSQL booleans as t/f; preserve their actual Java Boolean value.
+      for(int i=1;i<=rs.getMetaData().getColumnCount();i++)
+        row.put(rs.getMetaData().getColumnLabel(i),rs.getObject(i) instanceof Boolean value ? value.toString() : rs.getString(i));
       assertFalse(rs.next()); return row;
     }
   }
