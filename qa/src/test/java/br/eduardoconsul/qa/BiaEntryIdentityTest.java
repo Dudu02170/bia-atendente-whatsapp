@@ -35,7 +35,7 @@ class BiaEntryIdentityTest {
     try { if(db!=null) db.close(); } finally { if(pg!=null) pg.stop(); }
   }
   @BeforeEach void clear() throws Exception {
-    try(var s=db.createStatement()) { s.execute("TRUNCATE mensagens,leads,leads_whatsapp,mensagens_whatsapp RESTART IDENTITY"); }
+    try(var s=db.createStatement()) { s.execute("TRUNCATE mensagens,leads,leads_whatsapp,mensagens_whatsapp RESTART IDENTITY CASCADE"); }
   }
 
   @ParameterizedTest(name="identidade gravada, ID externo={0}")

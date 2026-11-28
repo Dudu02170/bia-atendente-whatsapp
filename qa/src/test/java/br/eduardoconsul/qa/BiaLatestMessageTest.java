@@ -37,7 +37,7 @@ class BiaLatestMessageTest {
   }
 
   @BeforeEach void messages() throws Exception {
-    try (var s = db.createStatement()) { s.execute("TRUNCATE mensagens_whatsapp RESTART IDENTITY"); }
+    try (var s = db.createStatement()) { s.execute("TRUNCATE mensagens_whatsapp RESTART IDENTITY CASCADE"); }
     // Execute the actual writer query too: fixtures must use the role written by the application.
     save("550000000001", "qa-old", "Primeira QA");
     save("550000000001", "qa-latest", "Última QA com 'aspas'");

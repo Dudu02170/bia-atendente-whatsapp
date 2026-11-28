@@ -34,7 +34,7 @@ class BiaSendAuthorizationTest {
     try { if(db!=null) db.close(); } finally { if(pg!=null) pg.stop(); }
   }
   @BeforeEach void prepare() throws Exception {
-    try(var s=db.createStatement()) { s.execute("TRUNCATE leads_whatsapp,mensagens_whatsapp RESTART IDENTITY"); }
+    try(var s=db.createStatement()) { s.execute("TRUNCATE leads_whatsapp,mensagens_whatsapp RESTART IDENTITY CASCADE"); }
     receive(PHONE,"qa-older","Entrada mais antiga QA");
     captured=receive(PHONE,ID,MESSAGE);
     receive("550000000002","qa-other","Outro telefone QA");

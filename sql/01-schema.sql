@@ -160,3 +160,11 @@ ALTER TABLE public.mensagens_whatsapp
     ON DELETE SET NULL;
 CREATE INDEX idx_mensagens_whatsapp_origem
     ON public.mensagens_whatsapp(mensagem_origem_id);
+
+-- Vínculo explícito do conjunto gravado atomicamente, sem inferir legado.
+CREATE TABLE public.vinculos_historico_resposta (
+    resposta_id integer PRIMARY KEY REFERENCES public.mensagens_whatsapp(id) ON DELETE CASCADE,
+    entrada_id integer NOT NULL UNIQUE REFERENCES public.mensagens(id) ON DELETE CASCADE,
+    saida_id integer NOT NULL UNIQUE REFERENCES public.mensagens(id) ON DELETE CASCADE,
+    CONSTRAINT vinculos_historico_resposta_ids_distintos CHECK (entrada_id <> saida_id)
+);

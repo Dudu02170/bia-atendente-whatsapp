@@ -6,7 +6,7 @@
 
 1. Abra o n8n em http://localhost:5678.
 2. Vá em **Workflows → Import from File** e escolha `bia-atendimento.json`.
-3. Em banco já existente, aplique a migração revisada `sql/migrations/002-resposta-origem.sql` antes de importar o workflow atualizado; valide primeiro numa cópia isolada. Banco novo recebe a coluna no inicializador `sql/01-schema.sql`. Não recrie o volume existente.
+3. Em banco já existente, aplique as migrações revisadas `sql/migrations/002-resposta-origem.sql` e depois `sql/migrations/003-vinculos-historico-resposta.sql` antes de importar o workflow atualizado; valide primeiro numa cópia isolada. Banco novo recebe a coluna no inicializador `sql/01-schema.sql`. Não recrie o volume existente.
 4. Crie uma credencial **Postgres** apontando para o banco do `docker-compose` (host `postgres`) e selecione-a nos nós de banco.
 5. A chave da Anthropic e a da Evolution API são lidas do `.env` pelas variáveis `ANTHROPIC_API_KEY`, `EVOLUTION_API_KEY` e `EVOLUTION_INSTANCE_NAME`. Nada fica escrito no fluxo.
 6. Troque os produtos de exemplo (`PROD-A`, `PROD-B`, `PROD-PRO`) nos nós **Base de produtos** e **Base de links oficiais** pelos produtos do seu negócio.
@@ -118,4 +118,15 @@ Critério conferido no canal Baileys da Evolution 2.3.7 do compose, fonte primá
 ## ID externo da resposta no histórico
 Salvar resposta Bot grava response.key.id em mensagens_whatsapp.message_id quando recebe string não vazia, preservando valor e escape. O ID interno mensagem_origem_id continua ligando a entrada user; os campos têm papéis distintos. Ausência/incompatibilidade/vazio preserva NULL para legado, sem backfill ou ID inventado.
 
-A constraint unique existente permanece: repetir ID externo rejeita toda a instrução, sem sobrescrever registro nem deixar resposta/histórico parcial. Não é deduplicação de envio ou retry idempotente; erro de banco após envio requer inspeção/reconciliação. Nenhuma migração adicional. Regressões usam SQL real em PostgreSQL descartável e saída do remetente com HTTP simulado, sem runtime n8n/serviço real.
+A constraint unique existente permanece. Colisão incompatível ou registro legado sem vínculo explícito rejeita toda a instrução, sem sobrescrever registro nem deixar resposta/histórico parcial. A reapresentação sequencial compatível descrita abaixo reutiliza somente o conjunto comprovado. Erro de banco após envio requer inspeção/reconciliação. Regressões usam SQL real em PostgreSQL descartável e saída do remetente com HTTP simulado, sem runtime n8n/serviço real.
+
+
+## QA-BIA-022 — Reapresentação sequencial da persistência confirmada
+
+Antes, reapresentar ao escritor o mesmo recibo já gravado gerava SQLSTATE 23505. Agora, novas respostas com recibo também gravam atomicamente o vínculo explícito entre assistant e seu par de histórico entrada/saída em vinculos_historico_resposta. A consulta retorna a resposta existente com persistencia_reutilizada=true somente se recibo, telefone, nome, texto, origem user e os conteúdos/direções do par coincidirem. Uma gravação nova retorna false. Não chama o remetente novamente nem cria/atualiza linhas nessa reutilização.
+
+Banco novo recebe a tabela no inicializador. Em banco existente, revisar/testar em cópia isolada a migração 003-vinculos-historico-resposta.sql após 002 e antes de importar o workflow. Não recriar volume. A migração é repetível no schema anterior conhecido e não associa registros legados por aproximação. Sem vínculo, com histórico incompleto ou payload divergente, a unicidade continua rejeitando a instrução com 23505. Excluir um registro associado remove apenas o vínculo via FK CASCADE, sem apagar os demais registros; o conjunto incompleto deixa de qualificar para reutilização. Nenhuma migração em produção.
+
+Aceitação/regressão: dois recibos idênticos (incluindo apóstrofo) reutilizam a mesma linha e mantêm snapshot integral; seis divergências recusam sem alteração; histórico removido não é reparado por inferência; migração aplicada duas vezes preserva legado; rejeição do vínculo reverte toda a gravação. Onze casos novos, BiaHistoryTest passa a 30; total previsto 241 Java/JUnit, com 79 PostgreSQL 16/JDBC descartável. Asserções de colisão anteriores mantidas. Executar cd qa && mvn --batch-mode --no-transfer-progress test (Java 17, Node 22, Maven e Docker). Renderização local e diff conferidos; execução integral/evidência no Actions e PR #2.
+
+Limites/backlog: reutilização sequencial do escritor, sem retry HTTP ou nova tentativa externa. Concorrência de INSERT pode continuar em 23505; não reserva envio nem garante exatamente uma vez. Resposta sem recibo/origem não ganha associação inferida. HTTP/filtro são simulados, SQL é real no banco descartável; não executa runtime/item linking/nós n8n, Evolution/WhatsApp ou IA reais. Reserva durável/reconciliação e validação n8n isolada seguem pendentes. Mesmo PR #2/fix/schema-timestamp dependente do PR #1 aberto, sem merge/force-push, nova dependência, dado/credencial real ou mensagem externa.

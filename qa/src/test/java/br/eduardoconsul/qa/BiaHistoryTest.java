@@ -238,6 +238,89 @@ class BiaHistoryTest {
     assertNull(saved.get("message_id")); assertMessageCounts(1); assertOtherHistory();
   }
 
+  @ParameterizedTest(name="reapresentação idêntica: {0}")
+  @ValueSource(strings={"qa-replay","qa'replay"})
+  void reapresentacaoSequencialReutilizaConjuntoSemNovaGravacao(String receipt) throws Exception {
+    var sent=senderResult(receipt); var first=saveInput(sent,"Entrada já recebida QA");
+    assertEquals("false",first.get("persistencia_reutilizada")); assertExplicitLink(first);
+    String before=snapshot();
+    var repeated=saveInput(sent,"Entrada já recebida QA");
+    assertEquals("true",repeated.get("persistencia_reutilizada"));
+    var expected=new HashMap<>(first); expected.put("persistencia_reutilizada","true"); assertEquals(expected,repeated);
+    assertEquals(before,snapshot(),"Reexecuta somente SQL; não chama remetente nem escreve novas linhas");
+    assertMessageCounts(1); assertOtherHistory();
+  }
+
+  @ParameterizedTest(name="recibo com payload divergente: {0}")
+  @ValueSource(strings={"texto","origem","entrada","nome","telefone","semOrigem"})
+  void reapresentacaoDivergenteContinuaFalhandoSemSobrescrever(String scenario) throws Exception {
+    var sent=senderResult("qa-registered"); saveInput(sent,"Entrada já recebida QA");
+    var changed=new HashMap<>(sent); String received="Entrada já recebida QA";
+    switch(scenario) {
+      case "texto" -> changed.put("textoResposta","Resposta diferente QA");
+      case "nome" -> changed.put("pushName","Outro nome QA");
+      case "telefone" -> changed.put("numero","550000000002");
+      case "semOrigem" -> changed.remove("mensagem_origem_id");
+      case "entrada" -> received="Entrada divergente QA";
+      default -> {
+        try(var st=db.createStatement();var rows=st.executeQuery("INSERT INTO mensagens_whatsapp(telefone,role,mensagem) VALUES ('"+PHONE+"','user','Entrada já recebida QA') RETURNING id")) {
+          assertTrue(rows.next()); changed.put("mensagem_origem_id",rows.getInt(1));
+        }
+      }
+    }
+    String before=snapshot(),originalReceived=received;
+    SQLException error=assertThrows(SQLException.class,()->saveInput(changed,originalReceived));
+    assertEquals("23505",error.getSQLState()); assertEquals(before,snapshot()); assertOtherHistory();
+  }
+
+  @Test void historicoIncompletoNaoETratadoComoReapresentacaoConcluida() throws Exception {
+    var sent=senderResult("qa-incomplete"); var saved=saveInput(sent,"Entrada já recebida QA"); assertExplicitLink(saved);
+    try(var st=db.createStatement()) {
+      assertEquals(1,st.executeUpdate("DELETE FROM mensagens WHERE id=(SELECT entrada_id FROM vinculos_historico_resposta WHERE resposta_id="+saved.get("id")+")"));
+      try(var rows=st.executeQuery("SELECT count(*) FROM vinculos_historico_resposta")) { assertTrue(rows.next()); assertEquals(0,rows.getInt(1)); }
+    }
+    String before=snapshot();
+    SQLException error=assertThrows(SQLException.class,()->saveInput(sent,"Entrada já recebida QA"));
+    assertEquals("23505",error.getSQLState()); assertEquals(before,snapshot(),"Não inventa vínculo nem encobre histórico removido");
+  }
+
+  @Test void migracaoDeVinculosRepetidaPreservaLegadoSemInferirAssociacoes() throws Exception {
+    try(var st=db.createStatement()) {
+      st.executeUpdate("INSERT INTO mensagens_whatsapp(telefone,role,mensagem,message_id) VALUES ('"+PHONE+"','assistant','Legado sem vínculo QA','qa-legacy-id')");
+    }
+    String before=snapshot();
+    try(var st=db.createStatement()) {
+      st.execute("DROP TABLE vinculos_historico_resposta");
+      String migration=Files.readString(Path.of("../sql/migrations/003-vinculos-historico-resposta.sql"));
+      st.execute(migration); st.execute(migration);
+      try(var rows=st.executeQuery("SELECT count(*) FROM vinculos_historico_resposta")) { assertTrue(rows.next()); assertEquals(0,rows.getInt(1)); }
+      try(var rows=st.executeQuery("SELECT count(*) FROM pg_constraint WHERE conrelid='vinculos_historico_resposta'::regclass AND contype='f' AND confdeltype='c'")) {
+        assertTrue(rows.next()); assertEquals(3,rows.getInt(1));
+      }
+    }
+    assertEquals(before,snapshot(),"Migração não recria registros nem associa o legado por aproximação");
+    var saved=saveInput(senderResult("qa-after-migration"),"Entrada já recebida QA"); assertExplicitLink(saved);
+  }
+
+  @Test void falhaDoVinculoReverteTodoConjunto() throws Exception {
+    var sent=senderResult("qa-link-rejected"); String before=snapshot();
+    try(var st=db.createStatement()) {
+      st.execute("ALTER TABLE vinculos_historico_resposta ADD CONSTRAINT qa_reject_link CHECK (resposta_id < 0)");
+      try {
+        SQLException error=assertThrows(SQLException.class,()->saveInput(sent,"Entrada já recebida QA"));
+        assertEquals("23514",error.getSQLState()); assertEquals(before,snapshot());
+      } finally { st.execute("ALTER TABLE vinculos_historico_resposta DROP CONSTRAINT qa_reject_link"); }
+    }
+    assertMessageCounts(0); assertOtherHistory();
+  }
+
+  private static void assertExplicitLink(Map<String,String> saved) throws Exception {
+    try(var st=db.createStatement();var rows=st.executeQuery("SELECT e.direcao AS entrada,e.conteudo AS texto_entrada,s.direcao AS saida,s.conteudo AS texto_saida FROM vinculos_historico_resposta v JOIN mensagens e ON e.id=v.entrada_id JOIN mensagens s ON s.id=v.saida_id WHERE v.resposta_id="+saved.get("id"))) {
+      assertTrue(rows.next()); assertEquals("entrada",rows.getString("entrada")); assertEquals("Entrada já recebida QA",rows.getString("texto_entrada"));
+      assertEquals("saida",rows.getString("saida")); assertEquals("Resposta D'Ávila QA",rows.getString("texto_saida")); assertFalse(rows.next());
+    }
+  }
+
   private static Map<String,Object> senderResult(String receipt) throws Exception {
     var data=Map.of("numero",PHONE,"textoResposta","Resposta D'Ávila QA","pushName","Cliente QA",
       "mensagem","Entrada já recebida QA","mensagem_origem_id",originId());
@@ -255,8 +338,8 @@ class BiaHistoryTest {
   }
   private static String snapshot() throws Exception {
     StringBuilder snapshot=new StringBuilder();
-    for(String table:List.of("mensagens_whatsapp","mensagens","leads"))
-      try(var s=db.createStatement();var rs=s.executeQuery("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY id),'[]'::jsonb)::text FROM "+table+" t")) {
+    for(String table:List.of("mensagens_whatsapp","mensagens","leads","vinculos_historico_resposta"))
+      try(var s=db.createStatement();var rs=s.executeQuery("SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)),'[]'::jsonb)::text FROM "+table+" t")) {
         assertTrue(rs.next()); snapshot.append(table).append(rs.getString(1));
       }
     return snapshot.toString();
