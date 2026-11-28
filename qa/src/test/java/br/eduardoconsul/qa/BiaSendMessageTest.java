@@ -97,6 +97,45 @@ class BiaSendMessageTest {
     assertEquals(JSON.valueToTree(response),row.path("response"));
   }
 
+  @ParameterizedTest(name="identidade contraditória do recibo: {0}")
+  @ValueSource(strings={
+    "{\"id\":\"qa-id\",\"fromMe\":false}",
+    "{\"id\":\"qa-id\",\"fromMe\":\"true\"}",
+    "{\"id\":\"qa-id\",\"fromMe\":null}",
+    "{\"id\":\"qa-id\",\"remoteJid\":\"550000000099@s.whatsapp.net\"}",
+    "{\"id\":\"qa-id\",\"remoteJid\":550000000001}",
+    "{\"id\":\"qa-id\",\"remoteJid\":null}",
+    "{\"id\":\"qa-id\",\"remoteJid\":\"\"}",
+    "{\"id\":\"qa-id\",\"remoteJid\":\"550000000001@lid\"}",
+    "{\"id\":\"qa-id\",\"remoteJid\":\"550000000001@g.us\"}"
+  })
+  void reciboComIdentidadeIncompativelNaoConfirmaEnvio(String keyJson) throws Exception {
+    JsonNode response=JSON.createObjectNode().set("key",JSON.readTree(keyJson));
+    var data=Map.of("numero","550000000001","textoResposta","  Resposta QA  ","mensagem_origem_id",7,"message_id_atual","qa-input");
+    JsonNode out=runEnvelope(Map.of("autorizado",true,"dados_envio",data),Map.of("response",response));
+    assertFalse(out.has("error")); assertRequest(out); assertEquals(1,out.path("result").size());
+    JsonNode row=out.path("result").get(0).path("json");
+    assertTrue(row.path("enviado").isBoolean()); assertFalse(row.path("enviado").asBoolean());
+    assertEquals("indeterminado",row.path("resultadoEnvio").asText());
+    assertEquals("Resposta da Evolution sem confirmação válida de envio",row.path("erroMensagem").asText());
+    assertEquals(response,row.path("erroBody"),"Preserva o recibo contraditório para reconciliação, sem retry");
+    assertEquals("550000000001",row.path("numero").asText()); assertEquals(7,row.path("mensagem_origem_id").asInt());
+    assertEquals("qa-input",row.path("message_id_atual").asText()); assertEquals("Resposta QA",row.path("textoResposta").asText());
+    assertFalse(row.has("response"),"Recibo incompatível não entra no campo de resposta confirmada");
+  }
+
+  @ParameterizedTest(name="metadado opcional coerente: {0}")
+  @ValueSource(strings={"{\"id\":\"qa-id\",\"fromMe\":true}",
+    "{\"id\":\"qa-id\",\"remoteJid\":\"550000000001@s.whatsapp.net\"}"})
+  void reciboPreservaCompatibilidadeComMetadadosOpcionais(String keyJson) throws Exception {
+    JsonNode response=JSON.createObjectNode().set("key",JSON.readTree(keyJson));
+    JsonNode out=run(Map.of("numero","550000000001","textoResposta","Resposta QA"),Map.of("response",response));
+    assertFalse(out.has("error")); assertRequest(out); assertEquals(1,out.path("result").size());
+    JsonNode row=out.path("result").get(0).path("json");
+    assertTrue(row.path("enviado").isBoolean()); assertTrue(row.path("enviado").asBoolean());
+    assertEquals(response,row.path("response"));
+  }
+
   private static void assertRequest(JsonNode out) {
     assertEquals(1, out.path("calls").size(), "Uma tentativa; o stub não faz rede");
     JsonNode call = out.path("calls").get(0);
