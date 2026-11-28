@@ -28,7 +28,7 @@ flowchart LR
 6. Um validador limpa a resposta: tira Markdown, troca links inventados pelo site oficial e barra promessas que a empresa não pode cumprir.
 7. A resposta volta pela Evolution API para o WhatsApp do cliente.
 
-O fluxo completo, com os 22 nós, está em [`workflows/`](workflows/).
+O fluxo completo, com os 23 nós, está em [`workflows/`](workflows/).
 
 ## Stack
 
@@ -82,3 +82,6 @@ cloudflared tunnel --url http://localhost:5678
 ## Autor
 
 **Eduardo Consul** · [LinkedIn](https://www.linkedin.com/in/eduardo-consul-32ab59260/) · [GitHub](https://github.com/Dudu02170)
+
+### Atualização de banco existente para correlação de respostas
+O workflow versionado usa a coluna opcional `mensagem_origem_id` para relacionar a resposta à entrada recebida. Banco novo recebe o schema completo em `sql/01-schema.sql`. Para banco existente no schema anterior do repositório, revise e valide em cópia isolada as migrações `sql/migrations/002-resposta-origem.sql` e depois `sql/migrations/003-vinculos-historico-resposta.sql` antes de importar o workflow atualizado; A segunda cria o vínculo explícito do par de histórico para novas respostas com recibo; nenhuma infere vínculos antigos. Não é necessário apagar/recriar o volume. Nenhuma migração de produção foi executada nesta entrega. Detalhes e limites em `workflows/README.md` e `qa/KNOWN_ISSUES.md`.

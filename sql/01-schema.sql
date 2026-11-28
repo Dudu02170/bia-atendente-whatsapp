@@ -133,9 +133,38 @@ CREATE INDEX idx_mensagens_lead_id ON public.mensagens USING btree (lead_id);
 
 CREATE INDEX idx_mensagens_telefone ON public.mensagens USING btree (telefone);
 
+-- Mantém a data da última edição do lead sem alterar a data de criação.
+CREATE FUNCTION public.atualizar_timestamp()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.atualizado_em := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
 CREATE TRIGGER trigger_leads_atualizar BEFORE UPDATE ON public.leads FOR EACH ROW EXECUTE FUNCTION public.atualizar_timestamp();
 
 ALTER TABLE ONLY public.mensagens
     ADD CONSTRAINT mensagens_lead_id_fkey FOREIGN KEY (lead_id) REFERENCES public.leads(id);
 
 
+
+-- Correlação opcional de uma resposta com a entrada que a originou.
+ALTER TABLE public.mensagens_whatsapp
+    ADD COLUMN mensagem_origem_id integer;
+ALTER TABLE public.mensagens_whatsapp
+    ADD CONSTRAINT mensagens_whatsapp_mensagem_origem_fkey
+    FOREIGN KEY (mensagem_origem_id) REFERENCES public.mensagens_whatsapp(id)
+    ON DELETE SET NULL;
+CREATE INDEX idx_mensagens_whatsapp_origem
+    ON public.mensagens_whatsapp(mensagem_origem_id);
+
+-- Vínculo explícito do conjunto gravado atomicamente, sem inferir legado.
+CREATE TABLE public.vinculos_historico_resposta (
+    resposta_id integer PRIMARY KEY REFERENCES public.mensagens_whatsapp(id) ON DELETE CASCADE,
+    entrada_id integer NOT NULL UNIQUE REFERENCES public.mensagens(id) ON DELETE CASCADE,
+    saida_id integer NOT NULL UNIQUE REFERENCES public.mensagens(id) ON DELETE CASCADE,
+    CONSTRAINT vinculos_historico_resposta_ids_distintos CHECK (entrada_id <> saida_id)
+);
